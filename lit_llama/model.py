@@ -150,8 +150,8 @@ class LLaMA(nn.Module):
         """Grow the model to a new config, by adding more layers 
             and increasing the embedding size.
         """
-        assert new_config.n_embd > self.config.n_embd
-        assert new_config.n_layer > self.config.n_layer
+        assert new_config.n_embd >= self.config.n_embd
+        assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
 
         # grow the embedding layer
@@ -166,6 +166,10 @@ class LLaMA(nn.Module):
         new_lm_head[: self.config.padded_vocab_size, : self.config.n_embd] = old_lm_head
         self.lm_head.weight.data = new_lm_head
 
+        old_transforemr_lnf = self.transformer.ln_f.scale.data
+        new_transformer_lnf = torch.ones((new_config.n_embd), device=old_transforemr_lnf.device, dtype=old_transforemr_lnf.dtype)
+        new_transformer_lnf[:self.config.n_embd] = old_transforemr_lnf
+        self.transformer.ln_f.scale.data = new_transformer_lnf
         # grow the transformer blocks
         new_blocks = [] 
         old_blocks = self.transformer.h
@@ -176,9 +180,9 @@ class LLaMA(nn.Module):
                 new_blocks.append(Block(new_config))
             else:
                 # widden old 
-                if i % 2 == 0:
-                    old_block_rm1 = old_blocks[0].rms_1.weight.data
-                    old_block_rm2 = old_blocks[0].rms_2.weight.data
+                if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
+                    old_block_rm1 = old_blocks[0].rms_1.scale.data
+                    old_block_rm2 = old_blocks[0].rms_2.scale.data
 
                     old_block_attn = old_blocks[0].attn.c_attn.weight.data
                     old_block_proj = old_blocks[0].attn.c_proj.weight.data
@@ -197,11 +201,18 @@ class LLaMA(nn.Module):
                     new_block.mlp.c_fc2.weight.data[:old_n_hidden, :self.config.n_embd] = old_block_mlp2
                     new_block.mlp.c_proj.weight.data[:self.config.n_embd, :old_n_hidden] = old_block_mlp3
 
-                    del old_blocks[i]
+                    new_blocks.append(new_block)
+                    del old_blocks[0]
                 else:
                     new_blocks.append(Block(new_config))
         
         self.transformer.h = nn.ModuleList(new_blocks)
+
+        self.emb_grow = new_config.n_embd - self.config.n_embd
+        self.layer_grow = new_config.n_layer - self.config.n_layer
+        self.head_grow = new_config.n_head - self.config.n_head
+        self.vocab_grow = new_config.padded_vocab_size - self.config.padded_vocab_size
+
         self.config = new_config
 
 class Block(nn.Module):
