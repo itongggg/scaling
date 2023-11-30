@@ -147,8 +147,7 @@ class LLaMA(nn.Module):
             self.mask_cache = None
 
     def grow_model(self, new_config: LLaMAConfig):
-        """Grow the model to a new config, by adding more layers 
-            and increasing the embedding size.
+        """Grow the model to a new config, by adding more layers and increasing the embedding size.
         """
         assert new_config.n_embd >= self.config.n_embd
         assert new_config.n_layer >= self.config.n_layer
@@ -156,7 +155,7 @@ class LLaMA(nn.Module):
 
         # grow the embedding layer
         old_wte = self.transformer.wte.weight.data
-        new_wte = torch.zeros((new_config.padded_vocab_size, new_config.n_embd), device=old_wte.device, dtype=old_wte.dtype)
+        new_wte = torch.randn((new_config.padded_vocab_size, new_config.n_embd), device=old_wte.device, dtype=old_wte.dtype)
         new_wte[: self.config.padded_vocab_size, : self.config.n_embd] = old_wte
         self.transformer.wte.weight.data = new_wte
 

@@ -3,6 +3,7 @@ import sys
 import math
 import glob
 import time
+
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
@@ -168,6 +169,7 @@ def train(
         micro_batch_size: int,
         max_iters: int,
         out_dir: str,
+        stage1: bool,
 ) -> None:
 
     step_count = 0

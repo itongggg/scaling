@@ -8,6 +8,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 import torch
+import torch.nn as nn
 import torch.utils._device
 from lightning.fabric.strategies import DeepSpeedStrategy, FSDPStrategy
 from torch.distributed.fsdp import FullStateDictConfig
@@ -160,7 +161,6 @@ def quantization(mode: str = None):
 
 
 # this is taken from torchhacks https://github.com/lernapparat/torchhacks
-
 
 class NotYetLoadedTensor:
     def __init__(self, metatensor, archiveinfo, storageinfo, rebuild_args):
