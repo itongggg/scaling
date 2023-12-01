@@ -294,11 +294,16 @@ def create_dataloader(
     n_chunks: int = 4,
     data_config: object = None,
     match_pattern: str = "*",
+    is_validate: bool = False
 ) -> DataLoader:
     datasets = []
     print(data_config.items())
     for prefix, _ in data_config.items():
         filenames = glob.glob(os.path.join(data_dir, prefix+match_pattern))
+        if is_validate:
+            filenames = filenames[-5000:]
+        else:
+            filenames =filenames[:5000]
         logger.info(f"Total filenames: {len(filenames)}")
         # Wrap is True, means allow repeat sampling
         dataset = PackedDataset(
@@ -357,6 +362,7 @@ def create_dataloaders(
             n_chunks=n_chunks,
             data_config=data_config,
             match_pattern=match_pattern,
+            is_validate=True
         )
         if val_data_dir
         else None

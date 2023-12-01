@@ -214,6 +214,16 @@ class LLaMA(nn.Module):
 
         self.config = new_config
 
+
+    def init_new_weights(self):
+        for i, block in enumerate(self.transformer.h):
+            if i > 2 * (self.config.n_layer - self.layer_grow) - 1:
+                pass
+            else:
+                if i % 2 == 0 or i > 2 * (self.layer_grow) - 1:
+                    pass
+                else:
+                    pass
 class Block(nn.Module):
     def __init__(self, config: LLaMAConfig) -> None:
         super().__init__()
