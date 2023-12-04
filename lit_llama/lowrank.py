@@ -1,7 +1,6 @@
 from email.policy import strict
 import torch
 
-
 def proximal(
     X: torch.Tensor,
     P: torch.Tensor,

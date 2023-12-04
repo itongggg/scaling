@@ -3,7 +3,7 @@ import sys
 import math
 import glob
 import time
-
+from pathlib import Path
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
@@ -27,11 +27,10 @@ from utils.tsdb_assistant import InfluxDBHelper
 from utils.util import load_yaml
 
 
-
 HOST_NAME = os.uname()[1]
 DISABLE_IF = False
 IBH = None
-
+eval_iters = 100
 def main(
         config_file: str = None
 ) -> None:
@@ -42,8 +41,15 @@ def main(
         strategy = DDPStrategy(
             process_group_backend='nccl'
         )
+    elif config.training_config.strategy.lower() == "fsdp":
+        auto_wrap_policy = partial(transformer_auto_wrap_policy,
+                                   transformer_layer_cls={Block})
+        strategy = FSDPStrategy(
+            auto_wrap_policy={Block},
+            activation_checkpointing_policy={Block}
+        )
     else:
-        raise Exception("Only support DDP strategy now.")
+        raise Exception("Only support FSDP and DDP strategy now.")
     
     fabric = L.Fabric(
         accelerator=config.training_config.accelerator,
@@ -55,7 +61,7 @@ def main(
 
     # Uncomments it for single node run with python.
     # Comments it for lightning run.
-    # fabric.launch()
+    fabric.launch()
     fabric.seed_everything(config.training_config.fabric_seed)
     model_config = LLaMAConfig.from_name(config.training_config.model_name)
 
@@ -108,7 +114,7 @@ def main(
         )
 
     with fabric.device:
-        torch.set_default_dtype(torch.bfloat16)
+        # torch.set_default_dtype(torch.bfloat16)
         model = LLaMA(model_config)
         model.apply(model._init_weights)
         torch.set_default_dtype(torch.float32)
@@ -122,8 +128,8 @@ def main(
         betas=(config.hyper_parameters.beta1, config.hyper_parameters.beta2),
     )
     optimizer = fabric.setup_optimizers(optimizer)
-    
-    process_batch_size = config.hyper_parameters.batch_size // config.training_config.devices
+    devices = config.training_config.devices if type(config.training_config.devices) == int else len(config.training_config.devices)
+    process_batch_size = config.hyper_parameters.batch_size // devices
     gradient_accumulation_iters = process_batch_size // config.hyper_parameters.micro_batch_size
     logger.info("start training")
     train(fabric=fabric,
@@ -138,14 +144,14 @@ def main(
           warmup_iters=config.hyper_parameters.warmup_iters,
           lr_decay_iters=config.hyper_parameters.lr_decay_iters,
           min_lr=config.hyper_parameters.min_lr,
-          devices=config.training_config.devices,
+          devices=devices,
           num_nodes=config.training_config.num_nodes,
           save_interval=config.training_config.save_interval,
           eval_interval=config.training_config.eval_interval,
           log_interval=config.training_config.log_interval,
           micro_batch_size=config.hyper_parameters.micro_batch_size,
           max_iters=config.hyper_parameters.max_iters,
-          out_dir=config.training_config.out_dir)
+          out_dir=config.training_config.output_dir)
 
 
 def train(
@@ -169,7 +175,7 @@ def train(
         micro_batch_size: int,
         max_iters: int,
         out_dir: str,
-        stage1: bool,
+        stage1: bool = False,
 ) -> None:
 
     step_count = 0
@@ -198,7 +204,7 @@ def train(
         t1 = time.time()
 
         if not is_accumulating:
-            fabric.clip_gradients(model=model, optimizer=optimizer, max_norm=grad_clip)
+            fabric.clip_gradients(model, optimizer=optimizer, max_norm=grad_clip)
             optimizer.step()
             optimizer.zero_grad()
 
@@ -267,12 +273,14 @@ def validate(
     fabric: L.Fabric,
     model: torch.nn.Module,
     val_dataloader: DataLoader,
-    eval_iters: int
+    eval_iters: int = eval_iters
 ) -> torch.Tensor:
     fabric.print("Validating ...")
     model.eval()
     losses = torch.zeros(eval_iters)
     for k, val_data in enumerate(val_dataloader):
+        if k >= eval_iters:
+            break
         input_ids = val_data[:, 0: model.config.block_size].contiguous()
         targets = val_data[:, 1: model.config.block_size + 1].contiguous()
         logits = model(input_ids)
@@ -301,7 +309,7 @@ def create_dataloader(
     for prefix, _ in data_config.items():
         filenames = glob.glob(os.path.join(data_dir, prefix+match_pattern))
         if is_validate:
-            filenames = filenames[-5000:]
+            filenames = filenames[-50:]
         else:
             filenames =filenames[:5000]
         logger.info(f"Total filenames: {len(filenames)}")

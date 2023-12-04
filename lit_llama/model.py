@@ -256,7 +256,7 @@ class Block(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config: LLaMAConfig) -> None:
+    def __init__(self, config: LLaMAConfig, num_new_dim: int = None) -> None:
         super().__init__()
         assert config.n_embd % config.n_head == 0
 
@@ -268,6 +268,10 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.block_size = config.block_size
+        if num_new_dim is not None:
+            self.c_mask = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        else:
+            self.c_mask = 1
 
     def forward(
         self,
@@ -343,9 +347,13 @@ class MLP(nn.Module):
         self.c_fc2 = nn.Linear(config.n_embd, n_hidden, bias=False)
         self.c_proj = nn.Linear(n_hidden, config.n_embd, bias=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.c_mask2 * F.silu(self.c_fc1(x)) * self.c_fc2(x)
-        x = self.c_mask1 * self.c_proj(x)
+    def forward(self, x: torch.Tensor, stage_1: bool = False) -> torch.Tensor:
+        if stage_1:
+            x = self.c_mask2 * F.silu(self.c_fc1(x)) * self.c_fc2(x)
+            x = self.c_mask1 * self.c_proj(x)
+        else:
+            x = F.silu(self.c_fc1(x)) * self.c_fc2(x)
+            x = self.c_proj(x)
         return x
 
 
@@ -355,7 +363,6 @@ class RMSNorm(nn.Module):
     Derived from https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py. BSD 3-Clause License:
     https://github.com/bzhangGo/rmsnorm/blob/master/LICENSE.
     """
-
     def __init__(self, size: int, dim: int = -1, eps: float = 1e-5, num_new_dim: int = None) -> None:
         super().__init__()
         if num_new_dim is not None:
@@ -366,13 +373,17 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.dim = dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, stage_1: bool = False) -> torch.Tensor:
         # NOTE: the original RMSNorm paper implementation is not equivalent
         # norm_x = x.norm(2, dim=self.dim, keepdim=True)
         # rms_x = norm_x * d_x ** (-1. / 2)
         # x_normed = x / (rms_x + self.eps)
-        norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_mask
-        x_normed = x * torch.rsqrt(norm_x + self.eps)
+        if stage_1:
+            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_mask
+            x_normed = x * torch.rsqrt(norm_x + self.eps)
+        else:
+            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
+            x_normed = x * torch.rsqrt(norm_x + self.eps)
         return self.scale * x_normed 
 
 
