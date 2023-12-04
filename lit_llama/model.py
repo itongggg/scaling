@@ -6,6 +6,7 @@ Based on the nanoGPT implementation: https://github.com/karpathy/nanoGPT.
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
+from sympy import N
 
 import torch
 import torch.nn as nn
@@ -40,6 +41,8 @@ class LLaMAConfig:
 
 
 llama_configs = {
+    "s": dict(n_layer=2, n_head=1, n_embd=16),
+    "s1": dict(n_layer=2, n_head=1, n_embd=20),
     "500M": dict(n_layer=32, n_head=8, n_embd=1024),
     "300M": dict(n_layer=24, n_head=7, n_embd=896),
     "7B": dict(n_layer=32, n_head=32, n_embd=4096),
@@ -76,7 +79,7 @@ class LLaMA(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layer))
 
     def forward(
-        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None
+        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None, stage_1: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[KVCache]]]:
         B, T = idx.size()
 
@@ -102,7 +105,10 @@ class LLaMA(nn.Module):
 
         # forward the model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-
+        if stage_1:
+            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            c_mask[:, :, :, self.config.n_embd - self.emb_grow:] = 0
+            x = x * c_mask
         if input_pos is None:  # proxy for use_cache=False
             for block in self.transformer.h:
                 x, _ = block(x, rope, mask, max_seq_length)
@@ -153,6 +159,10 @@ class LLaMA(nn.Module):
         assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
 
+        self.emb_grow = new_config.n_embd - self.config.n_embd
+        self.layer_grow = new_config.n_layer - self.config.n_layer
+        self.head_grow = new_config.n_head - self.config.n_head
+        self.vocab_grow = new_config.padded_vocab_size - self.config.padded_vocab_size
         # grow the embedding layer
         old_wte = self.transformer.wte.weight.data
         new_wte = torch.randn((new_config.padded_vocab_size, new_config.n_embd), device=old_wte.device, dtype=old_wte.dtype)
@@ -207,10 +217,6 @@ class LLaMA(nn.Module):
         
         self.transformer.h = nn.ModuleList(new_blocks)
 
-        self.emb_grow = new_config.n_embd - self.config.n_embd
-        self.layer_grow = new_config.n_layer - self.config.n_layer
-        self.head_grow = new_config.n_head - self.config.n_head
-        self.vocab_grow = new_config.padded_vocab_size - self.config.padded_vocab_size
 
         self.config = new_config
 
@@ -225,12 +231,14 @@ class LLaMA(nn.Module):
                 else:
                     pass
 class Block(nn.Module):
-    def __init__(self, config: LLaMAConfig) -> None:
+    def __init__(self, config: LLaMAConfig, num_new_head: int = None, num_new_dim: int = None) -> None:
         super().__init__()
         self.rms_1 = RMSNorm(config.n_embd)
         self.attn = CausalSelfAttention(config)
         self.rms_2 = RMSNorm(config.n_embd)
         self.mlp = MLP(config)
+        if num_new_dim is not None and num_new_head is not None:
+            mask = self
 
     def forward(
         self,
@@ -317,19 +325,27 @@ class CausalSelfAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, config: LLaMAConfig) -> None:
+    def __init__(self, config: LLaMAConfig, num_new_dim: int = None) -> None:
         super().__init__()
         hidden_dim = 4 * config.n_embd
         n_hidden = int(2 * hidden_dim / 3)
         n_hidden = find_multiple(n_hidden, 256)
-
+        if num_new_dim is not None:
+            old_n_hidden = find_multiple(int((config.n_embd - num_new_dim) * 8 / 3), 256)
+            self.c_mask1 = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            self.c_mask1[:, :, :, -num_new_dim:] = 0
+            self.c_mask2 = torch.ones(n_hidden).unsqueeze(0).unsqueeze(0).unsqueeze(0) if n_hidden > old_n_hidden else 1
+            self.c_mask2[:, :, :, -(n_hidden - old_n_hidden):] = 0
+        else:
+            self.c_mask1 = 1
+            self.c_mask2 = 1
         self.c_fc1 = nn.Linear(config.n_embd, n_hidden, bias=False)
         self.c_fc2 = nn.Linear(config.n_embd, n_hidden, bias=False)
         self.c_proj = nn.Linear(n_hidden, config.n_embd, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.silu(self.c_fc1(x)) * self.c_fc2(x)
-        x = self.c_proj(x)
+        x = self.c_mask2 * F.silu(self.c_fc1(x)) * self.c_fc2(x)
+        x = self.c_mask1 * self.c_proj(x)
         return x
 
 
@@ -340,8 +356,12 @@ class RMSNorm(nn.Module):
     https://github.com/bzhangGo/rmsnorm/blob/master/LICENSE.
     """
 
-    def __init__(self, size: int, dim: int = -1, eps: float = 1e-5) -> None:
+    def __init__(self, size: int, dim: int = -1, eps: float = 1e-5, num_new_dim: int = None) -> None:
         super().__init__()
+        if num_new_dim is not None:
+            self.c_mask = float(size) /  float(size - num_new_dim)
+        else:
+            self.c_mask = 1
         self.scale = nn.Parameter(torch.ones(size))
         self.eps = eps
         self.dim = dim
@@ -351,9 +371,9 @@ class RMSNorm(nn.Module):
         # norm_x = x.norm(2, dim=self.dim, keepdim=True)
         # rms_x = norm_x * d_x ** (-1. / 2)
         # x_normed = x / (rms_x + self.eps)
-        norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
+        norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_mask
         x_normed = x * torch.rsqrt(norm_x + self.eps)
-        return self.scale * x_normed
+        return self.scale * x_normed 
 
 
 def build_rope_cache(
