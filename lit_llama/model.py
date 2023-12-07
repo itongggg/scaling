@@ -106,9 +106,14 @@ class LLaMA(nn.Module):
         # forward the model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         if stage_1:
-            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            c_mask[:, :, :, self.config.n_embd - self.emb_grow:] = 0
+            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0)
+            c_mask[:, :, self.config.n_embd - self.emb_grow:] = 0
             x = x * c_mask
+            for block in self.transformer.h:
+                x, _ = block(x, rope, mask, max_seq_length, stage_1=stage_1)
+            x = self.transformer.ln_f(x, stage_1=stage_1)
+            logits = self.lm_head(x)
+            return logits
         if input_pos is None:  # proxy for use_cache=False
             for block in self.transformer.h:
                 x, _ = block(x, rope, mask, max_seq_length)
@@ -151,34 +156,37 @@ class LLaMA(nn.Module):
             # https://github.com/Lightning-AI/lit-parrot/pull/83#issuecomment-1558150179
             self.rope_cache = None
             self.mask_cache = None
-
+    
+    @torch.no_grad()
     def grow_model(self, new_config: LLaMAConfig):
         """Grow the model to a new config, by adding more layers and increasing the embedding size.
         """
         assert new_config.n_embd >= self.config.n_embd
         assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
-
+        self.old_block_index = []
+        self.new_block_index = []
         self.emb_grow = new_config.n_embd - self.config.n_embd
         self.layer_grow = new_config.n_layer - self.config.n_layer
         self.head_grow = new_config.n_head - self.config.n_head
         self.vocab_grow = new_config.padded_vocab_size - self.config.padded_vocab_size
+
         # grow the embedding layer
         old_wte = self.transformer.wte.weight.data
-        new_wte = torch.randn((new_config.padded_vocab_size, new_config.n_embd), device=old_wte.device, dtype=old_wte.dtype)
-        new_wte[: self.config.padded_vocab_size, : self.config.n_embd] = old_wte
-        self.transformer.wte.weight.data = new_wte
+        new_wte = nn.Embedding(new_config.padded_vocab_size, new_config.n_embd)
+        new_wte.weight[: self.config.padded_vocab_size, : self.config.n_embd] = old_wte
+        self.transformer.wte = new_wte
 
         # grow the linear head
         old_lm_head = self.lm_head.weight.data
-        new_lm_head = torch.zeros((new_config.padded_vocab_size, new_config.n_embd), device=old_lm_head.device, dtype=old_lm_head.dtype)
-        new_lm_head[: self.config.padded_vocab_size, : self.config.n_embd] = old_lm_head
-        self.lm_head.weight.data = new_lm_head
+        new_lm_head = nn.Linear(new_config.n_embd, new_config.padded_vocab_size, bias=False)
+        new_lm_head.weight[: self.config.padded_vocab_size, : self.config.n_embd] = old_lm_head
+        self.lm_head = new_lm_head
 
         old_transforemr_lnf = self.transformer.ln_f.scale.data
-        new_transformer_lnf = torch.ones((new_config.n_embd), device=old_transforemr_lnf.device, dtype=old_transforemr_lnf.dtype)
-        new_transformer_lnf[:self.config.n_embd] = old_transforemr_lnf
-        self.transformer.ln_f.scale.data = new_transformer_lnf
+        new_transformer_lnf = RMSNorm(new_config.n_embd, num_new_dim=self.emb_grow)
+        new_transformer_lnf.scale[:self.config.n_embd] = old_transforemr_lnf
+        self.transformer.ln_f = new_transformer_lnf
         # grow the transformer blocks
         new_blocks = [] 
         old_blocks = self.transformer.h
@@ -186,7 +194,8 @@ class LLaMA(nn.Module):
         old_n_hidden = find_multiple(int(self.config.n_embd * 4 * 2 / 3), 256)
         for i in range(new_config.n_layer):
             if i > 2 * self.config.n_layer - 1:
-                new_blocks.append(Block(new_config))
+                self.new_block_index.append(i)
+                new_blocks.append(Block(new_config, num_new_head=self.head_grow, num_new_dim=self.emb_grow))
             else:
                 # widden old 
                 if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
@@ -211,9 +220,11 @@ class LLaMA(nn.Module):
                     new_block.mlp.c_proj.weight.data[:self.config.n_embd, :old_n_hidden] = old_block_mlp3
 
                     new_blocks.append(new_block)
+                    self.old_block_index.append(i)
                     del old_blocks[0]
                 else:
                     new_blocks.append(Block(new_config))
+                    self.new_block_index.append(i)
         
         self.transformer.h = nn.ModuleList(new_blocks)
 
@@ -221,24 +232,64 @@ class LLaMA(nn.Module):
         self.config = new_config
 
 
-    def init_new_weights(self):
+    def _init_new_weights(self):
         for i, block in enumerate(self.transformer.h):
-            if i > 2 * (self.config.n_layer - self.layer_grow) - 1:
-                pass
+            if i in self.new_block_index:
+                block.apply(self._init_weights)
             else:
-                if i % 2 == 0 or i > 2 * (self.layer_grow) - 1:
-                    pass
+                pass
+    
+    def freeze_old_params(self):
+        def create_hook(shape):
+            def hook(grad):
+                grad_clone = grad.clone()
+                if type(shape) is not int:
+                    grad_clone[:shape[0], :shape[1]] = 0
                 else:
-                    pass
+                    grad_clone[:shape] = 0
+                return grad
+            return hook
+            
+        origin_dim = self.config.n_embd - self.emb_grow
+        origin_hidden = find_multiple(int(origin_dim * 8 / 3), 256)
+        for i, block in enumerate(self.transformer.h):
+            if i in self.old_block_index:
+                hook_rms = create_hook(origin_dim)
+                block.rms_1.scale.register_hook(hook_rms)
+                block.rms_2.scale.register_hook(hook_rms)
+
+                hook_c_attn = create_hook((3 * origin_dim, origin_dim))
+                block.attn.c_attn.weight.register_hook(hook_c_attn)
+
+                hook_c_proj = create_hook((origin_dim, origin_dim))
+                block.attn.c_proj.weight.register_hook(hook_c_proj)
+
+                hook_mlp_fc = create_hook((origin_hidden, origin_dim))
+                block.mlp.c_fc1.weight.register_hook(hook_mlp_fc)
+                block.mlp.c_fc2.weight.register_hook(hook_mlp_fc)
+
+                hook_mlp_proj = create_hook((origin_dim, origin_hidden))
+                block.mlp.c_proj.weight.register_hook(hook_mlp_proj)
+        self.transformer.ln_f.scale.register_hook(create_hook(origin_dim))
+        self.lm_head.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
+        self.transformer.wte.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
+                
+
+
+
 class Block(nn.Module):
     def __init__(self, config: LLaMAConfig, num_new_head: int = None, num_new_dim: int = None) -> None:
         super().__init__()
-        self.rms_1 = RMSNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config)
-        self.rms_2 = RMSNorm(config.n_embd)
-        self.mlp = MLP(config)
         if num_new_dim is not None and num_new_head is not None:
-            mask = self
+            self.rms_1 = RMSNorm(config.n_embd, num_new_dim=num_new_dim)
+            self.attn = CausalSelfAttention(config, num_new_dim=num_new_dim)
+            self.rms_2 = RMSNorm(config.n_embd, num_new_dim=num_new_dim)
+            self.mlp = MLP(config, num_new_dim=num_new_dim)
+        else:
+            self.rms_1 = RMSNorm(config.n_embd)
+            self.attn = CausalSelfAttention(config)
+            self.rms_2 = RMSNorm(config.n_embd)
+            self.mlp = MLP(config)
 
     def forward(
         self,
@@ -248,11 +299,18 @@ class Block(nn.Module):
         max_seq_length: int,
         input_pos: Optional[torch.Tensor] = None,
         kv_cache: Optional[KVCache] = None,
+        stage_1: bool = False,
     ) -> Tuple[torch.Tensor, Optional[KVCache]]:
-        h, new_kv_cache = self.attn(self.rms_1(x), rope, mask, max_seq_length, input_pos, kv_cache)
-        x = x + h
-        x = x + self.mlp(self.rms_2(x))
-        return x, new_kv_cache
+        if stage_1:
+            h, new_kv_cache = self.attn(self.rms_1(x, stage_1=stage_1), rope, mask, max_seq_length, input_pos, kv_cache, stage_1=stage_1)
+            x = x + h
+            x = x + self.mlp(self.rms_2(x, stage_1=stage_1), stage_1=stage_1)
+            return x, new_kv_cache
+        else:
+            h, new_kv_cache = self.attn(self.rms_1(x), rope, mask, max_seq_length, input_pos, kv_cache)
+            x = x + h
+            x = x + self.mlp(self.rms_2(x))
+            return x, new_kv_cache
 
 
 class CausalSelfAttention(nn.Module):
@@ -269,7 +327,8 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.block_size = config.block_size
         if num_new_dim is not None:
-            self.c_mask = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            self.c_mask = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0)
+            self.c_mask[:, :, -num_new_dim:] = 0
         else:
             self.c_mask = 1
 
@@ -281,13 +340,27 @@ class CausalSelfAttention(nn.Module):
         max_seq_length: int,
         input_pos: Optional[torch.Tensor] = None,
         kv_cache: Optional[KVCache] = None,
+        stage_1: bool = False,
     ) -> Tuple[torch.Tensor, Optional[KVCache]]:
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
-
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-
         head_size = C // self.n_head
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        if stage_1:
+            qkv = self.c_attn(x)
+            q, k, v = qkv.split(self.n_embd, dim=2)
+            new_q = torch.clone(q)
+            new_k = torch.clone(k)
+            new_v = torch.clone(v)
+            new_q[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,:self.n_embd-self.num_new_dim]
+            new_k[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,self.n_embd-self.num_new_dim:2*(self.n_embd-self.num_new_dim)]
+            new_v[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,2*(self.n_embd-self.num_new_dim):3*(self.n_embd-self.num_new_dim)]
+            new_q[:,:,-self.num_new_dim:] = 0
+            new_k[:,:,-self.num_new_dim:] = 0
+            new_v[:,:,-self.num_new_dim:] = 0
+        else:
+            q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+
+        
         k = k.view(B, T, self.n_head, head_size)
         q = q.view(B, T, self.n_head, head_size)
         v = v.view(B, T, self.n_head, head_size)
@@ -324,8 +397,10 @@ class CausalSelfAttention(nn.Module):
 
         # output projection
         y = self.c_proj(y)
-
-        return y, kv_cache
+        if stage_1:
+            return self.c_mask * y, kv_cache
+        else:        
+            return y, kv_cache
 
 
 class MLP(nn.Module):
@@ -336,10 +411,10 @@ class MLP(nn.Module):
         n_hidden = find_multiple(n_hidden, 256)
         if num_new_dim is not None:
             old_n_hidden = find_multiple(int((config.n_embd - num_new_dim) * 8 / 3), 256)
-            self.c_mask1 = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.c_mask1[:, :, :, -num_new_dim:] = 0
-            self.c_mask2 = torch.ones(n_hidden).unsqueeze(0).unsqueeze(0).unsqueeze(0) if n_hidden > old_n_hidden else 1
-            self.c_mask2[:, :, :, -(n_hidden - old_n_hidden):] = 0
+            self.c_mask1 = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0)
+            self.c_mask1[:, :, -num_new_dim:] = 0
+            self.c_mask2 = torch.ones(n_hidden).unsqueeze(0).unsqueeze(0) if n_hidden > old_n_hidden else 1
+            self.c_mask2[:, :, -(n_hidden - old_n_hidden):] = 0
         else:
             self.c_mask1 = 1
             self.c_mask2 = 1
@@ -366,7 +441,9 @@ class RMSNorm(nn.Module):
     def __init__(self, size: int, dim: int = -1, eps: float = 1e-5, num_new_dim: int = None) -> None:
         super().__init__()
         if num_new_dim is not None:
-            self.c_mask = float(size) /  float(size - num_new_dim)
+            self.c_scale = float(size) /  float(size - num_new_dim)
+            self.c_mask = torch.ones(size).unsqueeze(0).unsqueeze(0)
+            self.c_mask[:, :, -num_new_dim:] = 0
         else:
             self.c_mask = 1
         self.scale = nn.Parameter(torch.ones(size))
@@ -379,8 +456,9 @@ class RMSNorm(nn.Module):
         # rms_x = norm_x * d_x ** (-1. / 2)
         # x_normed = x / (rms_x + self.eps)
         if stage_1:
-            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_mask
+            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_scale
             x_normed = x * torch.rsqrt(norm_x + self.eps)
+            x_normed = x_normed * self.c_mask
         else:
             norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
             x_normed = x * torch.rsqrt(norm_x + self.eps)

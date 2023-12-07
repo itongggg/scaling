@@ -10,7 +10,7 @@ sys.path.append(str(wd))
 from functools import partial
 from pathlib import Path
 from typing import Tuple, Optional
-from lit_llama.utils import save_model_checkpoint
+from lit_llama.utils import save_model_checkpoint, get_logps
 from lit_llama.packed_dataset import PackedDataset, CombinedDataset
 from lit_llama.model import Block, LLaMA, LLaMAConfig
 import lightning as L
@@ -116,9 +116,16 @@ def main(
 
     with fabric.device:
         # torch.set_default_dtype(torch.bfloat16)
-        model = LLaMA(model_config)
-        model.apply(model._init_weights)
         torch.set_default_dtype(torch.float32)
+        model = LLaMA(model_config)
+        state_dict = fabric.load(config.training_config.checkpoint_path)
+        model.load_state_dict(state_dict)
+        new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
+        model.grow_model(new_model_config)
+        model.freeze_old_params()
+        model._init_new_weights()
+        # model.apply(model._init_weights)
+        
 
     model = fabric.setup_module(model)
 
@@ -176,7 +183,8 @@ def train(
         micro_batch_size: int,
         max_iters: int,
         out_dir: str,
-        stage1: bool = False,
+        stage1: bool = True,
+        kl_ctl: float = 0.01
 ) -> None:
 
     step_count = 0
@@ -197,10 +205,13 @@ def train(
 
         is_accumulating = (iter_num + 1) % grad_accum_steps != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
+            with torch.no_grad():
+                orig_logits = model(input_ids, stage1=stage1)
             logits = model(input_ids)
+            kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
             loss = torch.nn.functional.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1)
-            )
+            ) + kl_penalty
             fabric.backward(loss / grad_accum_steps)
         t1 = time.time()
 
@@ -314,7 +325,7 @@ def create_dataloader(
         if is_validate:
             filenames = filenames[-50:]
         else:
-            filenames =filenames[:num_files]
+            filenames =filenames[5000:6000]
         logger.info(f"Total filenames: {len(filenames)}")
         # Wrap is True, means allow repeat sampling
         dataset = PackedDataset(

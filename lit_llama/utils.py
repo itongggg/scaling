@@ -23,6 +23,16 @@ llama_model_sizes = {
     8192: "65B",  # 65B n_embd=8192
 }
 
+def get_logps(logits, labels):
+    """Returns the log probabilities of the labels given the logits.
+    
+    Args:
+        logits: torch.Tensor of shape (batch_size, sequence_length, vocab_size)
+        labels: torch.Tensor of shape (batch_size, sequence_length)
+    """
+    logps = torch.nn.functional.log_softmax(logits, dim=-1)
+    logps = torch.gather(logps, -1, labels.unsqueeze(-1)).squeeze(-1)
+    return logps
 
 def llama_model_lookup(checkpoint: dict) -> str:
     """Returns the LLaMA model name from the checkpoint.

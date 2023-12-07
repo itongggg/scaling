@@ -23,8 +23,10 @@ new_model_config = LLaMAConfig.from_name(new_model_name)
 model.grow_model(new_model_config)
 
 print(model)
-print(model.transformer['ln_f'].scale.shape)
-print(model.transformer['h'][0].rms_1.scale.shape)
+# print(model.transformer['ln_f'].scale.shape)
+# print(model.transformer['h'][0].rms_1.scale.shape)
+# print(model.new_block_index)
+# print(model.old_block_index)
 blcok_0_attn_new = model.transformer['h'][0].attn.c_attn.weight.detach()
 
 

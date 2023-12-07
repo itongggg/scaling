@@ -1,0 +1,454 @@
+{
+	"meta": {
+		"chronografVersion": "1.9.4",
+		"sources": {
+			"0": {
+				"name": "http://influxdb:8086",
+				"link": "/chronograf/v1/sources/0"
+			}
+		}
+	},
+	"dashboard": {
+		"id": "1",
+		"cells": [
+			{
+				"i": "58d658cb-5d4b-4b09-9211-cb47353d02d7",
+				"x": 6,
+				"y": 3,
+				"w": 6,
+				"h": 3,
+				"name": "Acc",
+				"queries": [
+					{
+						"query": "SELECT \"acc\" FROM \"metrics\".\"autogen\".\"metrics\" WHERE time > :dashboardTime: AND \"exp_name\"=:metrics_exp_name: AND \"subset\"=:metrics_subset:",
+						"queryConfig": {
+							"database": "",
+							"measurement": "",
+							"retentionPolicy": "",
+							"fields": [],
+							"tags": {},
+							"groupBy": {
+								"time": "",
+								"tags": []
+							},
+							"areTagsAccepted": false,
+							"rawText": "SELECT \"acc\" FROM \"metrics\".\"autogen\".\"metrics\" WHERE time > :dashboardTime: AND \"exp_name\"=:metrics_exp_name: AND \"subset\"=:metrics_subset:",
+							"range": null,
+							"shifts": null
+						},
+						"source": "",
+						"type": "influxql"
+					}
+				],
+				"axes": {
+					"x": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y2": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					}
+				},
+				"type": "line",
+				"colors": [
+					{
+						"id": "12faffba-f57b-4d69-8860-baeaa82b8d3e",
+						"type": "scale",
+						"hex": "#31C0F6",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					},
+					{
+						"id": "c9528a75-bdca-4150-bcea-cefa1a95b522",
+						"type": "scale",
+						"hex": "#A500A5",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					},
+					{
+						"id": "72ae98f7-e0d8-4249-847c-71c6fc067b33",
+						"type": "scale",
+						"hex": "#FF7E27",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					}
+				],
+				"legend": {},
+				"tableOptions": {
+					"verticalTimeAxis": true,
+					"sortBy": {
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					"wrapping": "truncate",
+					"fixFirstColumn": true
+				},
+				"fieldOptions": [
+					{
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					{
+						"internalName": "metrics.acc",
+						"displayName": "",
+						"visible": true
+					}
+				],
+				"timeFormat": "MM/DD/YYYY HH:mm:ss",
+				"decimalPlaces": {
+					"isEnforced": false,
+					"digits": 2
+				},
+				"note": "",
+				"noteVisibility": "default",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/cells/58d658cb-5d4b-4b09-9211-cb47353d02d7"
+				}
+			},
+			{
+				"i": "726e0770-edb3-465c-b9bf-c347db58caef",
+				"x": 0,
+				"y": 3,
+				"w": 6,
+				"h": 3,
+				"name": "Loss",
+				"queries": [
+					{
+						"query": "SELECT \"loss\" FROM \"metrics\".\"autogen\".\"metrics\" WHERE time > :dashboardTime: AND \"exp_name\"=:metrics_exp_name: AND \"subset\"=:metrics_subset:",
+						"queryConfig": {
+							"database": "",
+							"measurement": "",
+							"retentionPolicy": "",
+							"fields": [],
+							"tags": {},
+							"groupBy": {
+								"time": "",
+								"tags": []
+							},
+							"areTagsAccepted": false,
+							"rawText": "SELECT \"loss\" FROM \"metrics\".\"autogen\".\"metrics\" WHERE time > :dashboardTime: AND \"exp_name\"=:metrics_exp_name: AND \"subset\"=:metrics_subset:",
+							"range": null,
+							"shifts": null
+						},
+						"source": "",
+						"type": "influxql"
+					}
+				],
+				"axes": {
+					"x": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y2": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					}
+				},
+				"type": "line",
+				"colors": [
+					{
+						"id": "12faffba-f57b-4d69-8860-baeaa82b8d3e",
+						"type": "scale",
+						"hex": "#31C0F6",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					},
+					{
+						"id": "c9528a75-bdca-4150-bcea-cefa1a95b522",
+						"type": "scale",
+						"hex": "#A500A5",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					},
+					{
+						"id": "72ae98f7-e0d8-4249-847c-71c6fc067b33",
+						"type": "scale",
+						"hex": "#FF7E27",
+						"name": "Nineteen Eighty Four",
+						"value": "0"
+					}
+				],
+				"legend": {},
+				"tableOptions": {
+					"verticalTimeAxis": true,
+					"sortBy": {
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					"wrapping": "truncate",
+					"fixFirstColumn": true
+				},
+				"fieldOptions": [
+					{
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					{
+						"internalName": "metrics.acc",
+						"displayName": "",
+						"visible": true
+					}
+				],
+				"timeFormat": "MM/DD/YYYY HH:mm:ss",
+				"decimalPlaces": {
+					"isEnforced": false,
+					"digits": 2
+				},
+				"note": "",
+				"noteVisibility": "default",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/cells/726e0770-edb3-465c-b9bf-c347db58caef"
+				}
+			},
+			{
+				"i": "34e2ad06-8b9c-4fe9-a360-d5c2f1019f62",
+				"x": 0,
+				"y": 0,
+				"w": 12,
+				"h": 3,
+				"name": "Hparams",
+				"queries": [
+					{
+						"query": "SELECT \"lr\", \"total_iter\" FROM \"hparams\".\"autogen\".\"hparams\" WHERE time > :dashboardTime: AND time < :upperDashboardTime: AND \"exp_name\"=:hparams_exp_name:",
+						"queryConfig": {
+							"database": "",
+							"measurement": "",
+							"retentionPolicy": "",
+							"fields": [],
+							"tags": {},
+							"groupBy": {
+								"time": "",
+								"tags": []
+							},
+							"areTagsAccepted": false,
+							"rawText": "SELECT \"lr\", \"total_iter\" FROM \"hparams\".\"autogen\".\"hparams\" WHERE time > :dashboardTime: AND time < :upperDashboardTime: AND \"exp_name\"=:hparams_exp_name:",
+							"range": null,
+							"shifts": null
+						},
+						"source": "",
+						"type": "influxql"
+					}
+				],
+				"axes": {
+					"x": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					},
+					"y2": {
+						"bounds": [
+							"",
+							""
+						],
+						"label": "",
+						"prefix": "",
+						"suffix": "",
+						"base": "10",
+						"scale": "linear"
+					}
+				},
+				"type": "table",
+				"colors": [
+					{
+						"id": "base",
+						"type": "text",
+						"hex": "#00C9FF",
+						"name": "laser",
+						"value": "-1000000000000000000"
+					}
+				],
+				"legend": {},
+				"tableOptions": {
+					"verticalTimeAxis": true,
+					"sortBy": {
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					"wrapping": "truncate",
+					"fixFirstColumn": true
+				},
+				"fieldOptions": [
+					{
+						"internalName": "time",
+						"displayName": "",
+						"visible": true
+					},
+					{
+						"internalName": "hparams.lr",
+						"displayName": "",
+						"visible": true
+					},
+					{
+						"internalName": "hparams.total_iter",
+						"displayName": "",
+						"visible": true
+					}
+				],
+				"timeFormat": "MM/DD/YYYY HH:mm:ss",
+				"decimalPlaces": {
+					"isEnforced": false,
+					"digits": 2
+				},
+				"note": "",
+				"noteVisibility": "default",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/cells/34e2ad06-8b9c-4fe9-a360-d5c2f1019f62"
+				}
+			}
+		],
+		"templates": [
+			{
+				"tempVar": ":hparams_exp_name:",
+				"values": [
+					{
+						"value": "quick_test",
+						"type": "tagValue",
+						"selected": true
+					}
+				],
+				"id": "9699bc35-45d8-4949-b039-08fe92e33dbe",
+				"type": "tagValues",
+				"label": "",
+				"query": {
+					"influxql": "SHOW TAG VALUES ON :database: FROM :measurement: WITH KEY=:tagKey:",
+					"db": "hparams",
+					"measurement": "hparams",
+					"tagKey": "exp_name",
+					"fieldKey": ""
+				},
+				"sourceID": "dynamic",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/templates/9699bc35-45d8-4949-b039-08fe92e33dbe"
+				}
+			},
+			{
+				"tempVar": ":metrics_exp_name:",
+				"values": [
+					{
+						"value": "quick_test",
+						"type": "tagValue",
+						"selected": true
+					}
+				],
+				"id": "f454f9d1-c8ac-4694-8a54-caa627d6b72c",
+				"type": "tagValues",
+				"label": "",
+				"query": {
+					"influxql": "SHOW TAG VALUES ON :database: FROM :measurement: WITH KEY=:tagKey:",
+					"db": "metrics",
+					"measurement": "metrics",
+					"tagKey": "exp_name",
+					"fieldKey": ""
+				},
+				"sourceID": "dynamic",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/templates/f454f9d1-c8ac-4694-8a54-caa627d6b72c"
+				}
+			},
+			{
+				"tempVar": ":metrics_subset:",
+				"values": [
+					{
+						"value": "train",
+						"type": "tagValue",
+						"selected": true
+					}
+				],
+				"id": "7628d049-9dd9-45fe-b545-47211c93a1ac",
+				"type": "tagValues",
+				"label": "",
+				"query": {
+					"influxql": "SHOW TAG VALUES ON :database: FROM :measurement: WITH KEY=:tagKey:",
+					"db": "metrics",
+					"measurement": "metrics",
+					"tagKey": "subset",
+					"fieldKey": ""
+				},
+				"sourceID": "dynamic",
+				"links": {
+					"self": "/chronograf/v1/dashboards/1/templates/7628d049-9dd9-45fe-b545-47211c93a1ac"
+				}
+			}
+		],
+		"name": "ExpMetrics",
+		"organization": "default",
+		"links": {
+			"self": "/chronograf/v1/dashboards/1",
+			"cells": "/chronograf/v1/dashboards/1/cells",
+			"templates": "/chronograf/v1/dashboards/1/templates"
+		}
+	}
+}

@@ -20,6 +20,7 @@ class RMSNorm(nn.Module):
         # x_normed = x / (rms_x + self.eps)
         norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_mask
         x_normed = x * torch.rsqrt(norm_x + self.eps)
+        print(x_normed)
         return self.scale * x_normed 
     
 x = torch.randn((3, 3))
