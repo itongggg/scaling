@@ -249,33 +249,47 @@ class LLaMA(nn.Module):
                     grad_clone[:shape] = 0
                 return grad
             return hook
-            
+        self.hooks = {}
         origin_dim = self.config.n_embd - self.emb_grow
         origin_hidden = find_multiple(int(origin_dim * 8 / 3), 256)
         for i, block in enumerate(self.transformer.h):
             if i in self.old_block_index:
+                hook_id_rms_1 = f"{i}_rms_1_scale"
+                hook_id_rms_2 = f"{i}_rms_2_scale"
+                hook_id_c_attn = f"{i}_c_attn_weight"
+                hook_id_c_proj = f"{i}_c_proj_weight"
+                hook_id_mlp_fc1 = f"{i}_mlp_fc1"
+                hook_id_mlp_fc2 = f"{i}_mlp_fc2"
+                hook_id_mlp_proj = f"{i}_mlp_proj"
+
                 hook_rms = create_hook(origin_dim)
-                block.rms_1.scale.register_hook(hook_rms)
-                block.rms_2.scale.register_hook(hook_rms)
+                self.hooks[hook_id_rms_1] = block.rms_1.scale.register_hook(hook_rms)
+                self.hooks[hook_id_rms_2] = block.rms_2.scale.register_hook(hook_rms)
 
                 hook_c_attn = create_hook((3 * origin_dim, origin_dim))
-                block.attn.c_attn.weight.register_hook(hook_c_attn)
+                self.hooks[hook_id_c_attn] = block.attn.c_attn.weight.register_hook(hook_c_attn)
 
                 hook_c_proj = create_hook((origin_dim, origin_dim))
-                block.attn.c_proj.weight.register_hook(hook_c_proj)
+                self.hooks[hook_id_c_proj] = block.attn.c_proj.weight.register_hook(hook_c_proj)
 
                 hook_mlp_fc = create_hook((origin_hidden, origin_dim))
-                block.mlp.c_fc1.weight.register_hook(hook_mlp_fc)
-                block.mlp.c_fc2.weight.register_hook(hook_mlp_fc)
+                self.hooks[hook_id_mlp_fc1] = block.mlp.c_fc1.weight.register_hook(hook_mlp_fc)
+                self.hooks[hook_id_mlp_fc2] = block.mlp.c_fc2.weight.register_hook(hook_mlp_fc)
 
                 hook_mlp_proj = create_hook((origin_dim, origin_hidden))
-                block.mlp.c_proj.weight.register_hook(hook_mlp_proj)
-        self.transformer.ln_f.scale.register_hook(create_hook(origin_dim))
-        self.lm_head.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
-        self.transformer.wte.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
+                self.hooks[hook_id_mlp_proj] = block.mlp.c_proj.weight.register_hook(hook_mlp_proj)
+        lnf_handle = self.transformer.ln_f.scale.register_hook(create_hook(origin_dim))
+        lm_head_handle = self.lm_head.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
+        wte_handle = self.transformer.wte.weight.register_hook(create_hook((self.config.padded_vocab_size, origin_dim)))
+        self.hooks["lnf"] = lnf_handle
+        self.hooks["lm_head"] = lm_head_handle
+        self.hooks["wte"] = wte_handle
                 
 
-
+    def unfreeze_old_params(self):
+        for hook in self.hooks.values():
+            hook.remove()
+        self.hooks = {}
 
 class Block(nn.Module):
     def __init__(self, config: LLaMAConfig, num_new_head: int = None, num_new_dim: int = None) -> None:

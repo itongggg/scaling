@@ -205,10 +205,14 @@ def train(
 
         is_accumulating = (iter_num + 1) % grad_accum_steps != 0
         with fabric.no_backward_sync(model, enabled=is_accumulating):
-            with torch.no_grad():
-                orig_logits = model(input_ids, stage1=stage1)
             logits = model(input_ids)
-            kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+            if stage1:
+                with torch.no_grad():
+                    orig_logits = model(input_ids, stage1=stage1)
+                    kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+            else:
+                kl_penalty = 0
+                model.unfreeze_old_params()
             loss = torch.nn.functional.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1)
             ) + kl_penalty
@@ -266,7 +270,9 @@ def train(
                                            "time": dt*1000,
                                            "total_time": total_time/3600,
                                            "speed": (tokens * devices * num_nodes) / step_time,
-                                           "train_progress": iter_num/max_iters},
+                                           "train_progress": iter_num/max_iters,
+                                           "kl_penalty": kl_penalty,
+                                           },
                                   subset="train")
             fabric.print(
                 f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device"
@@ -275,7 +281,9 @@ def train(
         if not is_accumulating:
             tokens = 0
             step_time = 0.0
-
+        if abs(kl_penalty) <= 1e-4 or iter_num > 30000:
+            stage1 = False
+            fabric.print("Stage 1 finished.")
         if iter_num > max_iters:
             break
 
@@ -315,7 +323,7 @@ def create_dataloader(
     data_config: object = None,
     match_pattern: str = "*",
     is_validate: bool = False,
-    num_files: int = 5000
+    num_files: int = 8000
 ) -> DataLoader:
     datasets = []
     global config
@@ -325,7 +333,7 @@ def create_dataloader(
         if is_validate:
             filenames = filenames[-50:]
         else:
-            filenames =filenames[5000:6000]
+            filenames =filenames[5000:num_files]
         logger.info(f"Total filenames: {len(filenames)}")
         # Wrap is True, means allow repeat sampling
         dataset = PackedDataset(
