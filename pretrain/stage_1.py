@@ -196,7 +196,7 @@ def train(
     total_time = 0.0
     for iter_num, train_data in enumerate(train_dataloader):
         t0 = time.time()
-
+        flag = True
         lr = get_lr(it=iter_num, learning_rate=learning_rate, warmup_iters=warmup_iters, lr_decay_iters=lr_decay_iters, min_lr=min_lr) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
@@ -212,7 +212,10 @@ def train(
                     kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
             else:
                 kl_penalty = 0
-                model.unfreeze_old_params()
+                if flag:
+                    model.unfreeze_old_params()
+                    flag = False
+            
             loss = torch.nn.functional.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1)
             ) + kl_penalty

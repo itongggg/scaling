@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from typing_extensions import Self
-
+from lowrank import proximal
 from lit_llama.utils import find_multiple
 
 
@@ -237,7 +237,7 @@ class LLaMA(nn.Module):
             if i in self.new_block_index:
                 block.apply(self._init_weights)
             else:
-                pass
+                
     
     def freeze_old_params(self):
         def create_hook(shape):
