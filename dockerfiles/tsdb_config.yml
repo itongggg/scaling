@@ -1,0 +1,12 @@
+influxdb:
+  host: "172.25.0.109"
+  port: 8086
+  username: "rd"
+  password: "HaveANiceDay!"
+  org: "rd"
+  token: "HaveANiceDay!"
+chronograf:
+  host: "127.0.0.1"
+  port: 8088
+  dashboard_url: "http://127.0.0.1:8088/sources/0/dashboards/1?refresh=5s&tempVars%5Bhparams_exp_name%5D=quick_test&tempVars%5Bmetrics_exp_name%5D=quick_test&tempVars%5Bmetrics_subset%5D=train"
+  live_dashboard: "http://localhost:8088/sources/0/dashboards/5?refresh=5s"

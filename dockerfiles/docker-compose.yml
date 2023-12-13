@@ -1,0 +1,29 @@
+version: '3'
+services:
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    restart: always
+    ports:
+      - '8086:8086'
+    environment:
+      - INFLUXDB=CG
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=rd
+      - DOCKER_INFLUXDB_INIT_PASSWORD=HaveANiceDay!
+      - DOCKER_INFLUXDB_INIT_ORG=RD
+      - DOCKER_INFLUXDB_INIT_BUCKET=runtime
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=HaveANiceDay!
+  chronograf:
+    image: chronograf:1.9
+    container_name: chronograf
+    restart: always
+    ports:
+      - '6699:8888'
+    depends_on:
+      - influxdb
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+volumes:
+  data:
+    driver: local
