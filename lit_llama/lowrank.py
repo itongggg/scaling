@@ -19,7 +19,7 @@ def proximal(
         U, S, V = torch.linalg.svd(Y)
         S = torch.clamp(torch.abs(S - t * mu), max=0)
         Xc = U @ torch.diag(S) @ V.T
-        if torch.norm(P * (Xc - M)) < 1e-7:
+        if torch.norm(P * (Xc - M)) < 1e-5:
             break
     if forced:
         Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
