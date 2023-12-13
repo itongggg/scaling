@@ -123,7 +123,7 @@ def main(
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
         model.freeze_old_params()
-        model._init_new_weights()
+        model._init_new_weights(config.training_config.is_low_rank)
         # model.apply(model._init_weights)
         
 
@@ -284,7 +284,7 @@ def train(
         if not is_accumulating:
             tokens = 0
             step_time = 0.0
-        if abs(kl_penalty) <= 1e-4 or iter_num > 30000:
+        if abs(kl_penalty) <= 1e-4 or iter_num >= 30000:
             stage1 = False
             fabric.print("Stage 1 finished.")
         if iter_num > max_iters:

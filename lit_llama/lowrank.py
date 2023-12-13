@@ -1,12 +1,13 @@
 from email.policy import strict
 import torch
-
+import torch.nn as nn
 def proximal(
     M: torch.Tensor,
     mu: float,
     t: float,
     shape: tuple,
-    step: int = 10
+    step: int = 50,
+    forced: bool = True
 ) -> torch.Tensor:
     """Proximal operator for nuclear norm.
     """
@@ -20,7 +21,8 @@ def proximal(
         Xc = U @ torch.diag(S) @ V.T
         if torch.norm(P * (Xc - M)) < 1e-7:
             break
-    Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
+    if forced:
+        Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
     M = Xc
     return M
 

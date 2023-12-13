@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 
-ck_path = "/workspace/checkpoints/300m-base/iter-049999.pt"
+ck_path = "/workspace/scaling/checkpoints/iter-049999.pt"
 model = torch.load(ck_path)
 
 layer_numbers = []
@@ -23,33 +23,36 @@ mlp_c_fc1_list_g5 = []
 mlp_c_fc2_list_g5 = []
 mlp_c_proj_list_g5 = []
 
+
+threshold = 4
 for key in model.keys():
-    if key.contains("wte"):
+    if "wte" in key:
         continue
     if key.startswith("transformer"): 
         if key.endswith("weight"):
             
             rank = torch.linalg.matrix_rank(model[key])
             _, S, _ = torch.linalg.svd(model[key])
-            layer_number = int(key.split('.')[2]) 
-            layer_numbers.append(layer_number)
-            if key.contains("attn"):
-                if key.contains("c_attn"):
+            layer_number = int(key.split('.')[2])
+            if layer_number not in layer_numbers: 
+                layer_numbers.append(layer_number)
+            if "attn" in key:
+                if "c_attn" in key:
                     attn_list_sum.append(torch.sum(S).item())
-                    attn_list_g5.append((S > 5).sum.item())
+                    attn_list_g5.append((S > threshold).sum().item())
                 else:
                     c_proj_list_sum.append(torch.sum(S).item())
-                    c_proj_list_g5.append((S > 5).sum.item())
+                    c_proj_list_g5.append((S > threshold).sum().item())
             else:
-                if key.contains("c_fc1"):
+                if "c_fc1" in key:
                     mlp_c_fc1_list_sum.append(torch.sum(S).item())
-                    mlp_c_fc1_list_g5.append((S > 5).sum.item())
-                elif key.contains("c_fc2"):
+                    mlp_c_fc1_list_g5.append((S > threshold).sum().item())
+                elif "c_fc2" in key:
                     mlp_c_fc2_list_sum.append(torch.sum(S).item())
-                    mlp_c_fc2_list_g5.append((S > 5).sum.item())
+                    mlp_c_fc2_list_g5.append((S > threshold).sum().item())
                 else:
                     mlp_c_proj_list_sum.append(torch.sum(S).item())
-                    mlp_c_proj_list_g5.append((S > 5).sum.item())
+                    mlp_c_proj_list_g5.append((S > threshold).sum().item())
                 
     # Create a figure with subplots
 fig, axs = plt.subplots(2, 5, figsize=(25, 10))
@@ -84,4 +87,5 @@ for ax in axs.flat:
 
 # Adjust layout
 plt.tight_layout()
+plt.savefig('singular_values_analysis_4.png')
 plt.show()
