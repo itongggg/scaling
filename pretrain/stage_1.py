@@ -1,3 +1,4 @@
+from logging import config
 import os
 import sys
 import math
@@ -159,7 +160,9 @@ def main(
           log_interval=config.training_config.log_interval,
           micro_batch_size=config.hyper_parameters.micro_batch_size,
           max_iters=config.hyper_parameters.max_iters,
-          out_dir=config.training_config.output_dir)
+          out_dir=config.training_config.output_dir,
+          stage1=config.training_config.stage1,
+          kl_ctl=config.hyper_parameters.kl_ctl)
 
 
 def train(
@@ -196,7 +199,7 @@ def train(
     total_time = 0.0
     for iter_num, train_data in enumerate(train_dataloader):
         t0 = time.time()
-        flag = True
+        flag = config.training_config.flag
         lr = get_lr(it=iter_num, learning_rate=learning_rate, warmup_iters=warmup_iters, lr_decay_iters=lr_decay_iters, min_lr=min_lr) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
@@ -284,7 +287,7 @@ def train(
         if not is_accumulating:
             tokens = 0
             step_time = 0.0
-        if abs(kl_penalty) <= 1e-4 or iter_num >= 30000:
+        if abs(kl_penalty) <= 1e-4 or iter_num >= 29999:
             stage1 = False
             fabric.print("Stage 1 finished.")
         if iter_num > max_iters:

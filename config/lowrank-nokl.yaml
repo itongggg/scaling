@@ -1,4 +1,4 @@
-exp_name: "300m-500m-random-base"
+exp_name: "300m-500m-lowrank-nokl"
 training_config:
   output_dir: "/workspace/checkpoints/300m-base"
   save_interval: 100
@@ -19,10 +19,10 @@ training_config:
   new_model_name: "500M"
   is_recovery: False
   checkpoint_path: "/mnt/pool2/tmp/iter-049999.pt"
-  is_low_rank: False
+  is_low_rank: True
   num_files: 8000
   is_stage1: False
-  flag: False
+  flag: True
   kl_ctl: 0.01
 log_config:
   config_file: "/workspace/scaling/dockerfiles/tsdb_config.yml"
