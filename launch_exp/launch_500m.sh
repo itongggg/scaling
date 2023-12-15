@@ -6,8 +6,8 @@ echo "$SCRIPT_DIR"
 echo "$MAIN_DIR"
 
 
-CONFIG_PATH="$MAIN_DIR/config/500m.yaml"
-CMD="python $MAIN_DIR/pretrain/pretrain.py --config_file $CONFIG_PATH"
+CONFIG_PATH="$MAIN_DIR/config/lowrank-kl.yaml"
+CMD="python $MAIN_DIR/pretrain/stage_1.py --config_file $CONFIG_PATH"
 
 echo "$CMD"
 eval "$CMD"

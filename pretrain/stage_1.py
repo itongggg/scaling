@@ -26,12 +26,15 @@ from loguru import logger
 import colorful as cf
 from utils.tsdb_assistant import InfluxDBHelper
 from utils.util import load_yaml
+import csv
 
 
 HOST_NAME = os.uname()[1]
 DISABLE_IF = False
 IBH = None
 eval_iters = 100
+CSV_HEAD = ['iter', 'lr', 'step', 'train_loss', 'val_loss', 'time', 'speed', 'kl_penalty']
+
 def main(
         config_file: str = None
 ) -> None:
@@ -119,7 +122,9 @@ def main(
         # torch.set_default_dtype(torch.bfloat16)
         torch.set_default_dtype(torch.float32)
         model = LLaMA(model_config)
-        state_dict = fabric.load(config.training_config.checkpoint_path)
+        # print(f"model: {model}")
+        state_dict = torch.load(config.training_config.checkpoint_path)
+        
         model.load_state_dict(state_dict)
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
@@ -197,101 +202,110 @@ def train(
     tokens_sec = 0.0
     prev_t1 = time.time()
     total_time = 0.0
-    for iter_num, train_data in enumerate(train_dataloader):
-        t0 = time.time()
-        flag = config.training_config.flag
-        lr = get_lr(it=iter_num, learning_rate=learning_rate, warmup_iters=warmup_iters, lr_decay_iters=lr_decay_iters, min_lr=min_lr) if decay_lr else learning_rate
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
-        input_ids = train_data[:, 0: model.config.block_size].contiguous()
-        targets = train_data[:, 1: model.config.block_size + 1].contiguous()
+    
+    with open(config.log_config.csv_file, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerow(CSV_HEAD)
+        for iter_num, train_data in enumerate(train_dataloader):
+            t0 = time.time()
+            flag = config.training_config.flag
+            lr = get_lr(it=iter_num, learning_rate=learning_rate, warmup_iters=warmup_iters, lr_decay_iters=lr_decay_iters, min_lr=min_lr) if decay_lr else learning_rate
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
+            input_ids = train_data[:, 0: model.config.block_size].contiguous()
+            targets = train_data[:, 1: model.config.block_size + 1].contiguous()
 
-        is_accumulating = (iter_num + 1) % grad_accum_steps != 0
-        with fabric.no_backward_sync(model, enabled=is_accumulating):
-            logits = model(input_ids)
-            if stage1:
-                with torch.no_grad():
-                    orig_logits = model(input_ids, stage1=stage1)
-                    kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
-            else:
-                kl_penalty = 0
-                if flag:
-                    model.unfreeze_old_params()
-                    flag = False
-            
-            loss = torch.nn.functional.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1)
-            ) + kl_penalty
-            fabric.backward(loss / grad_accum_steps)
-        t1 = time.time()
-
-        if not is_accumulating:
-            fabric.clip_gradients(model, optimizer=optimizer, max_norm=grad_clip)
-            optimizer.step()
-            optimizer.zero_grad()
-
-            step_count += 1
+            is_accumulating = (iter_num + 1) % grad_accum_steps != 0
+            with fabric.no_backward_sync(model, enabled=is_accumulating):
+                logits = model(input_ids)
+                if stage1:
+                    with torch.no_grad():
+                        orig_logits = model(input_ids, stage1=stage1)
+                        kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+                else:
+                    kl_penalty = 0
+                    if flag:
+                        model.unfreeze_old_params()
+                        flag = False
+                
+                loss = torch.nn.functional.cross_entropy(
+                    logits.view(-1, logits.size(-1)), targets.view(-1)
+                ) + kl_penalty
+                fabric.backward(loss / grad_accum_steps)
             t1 = time.time()
 
-            if val_dataloader is not None and step_count % eval_interval == 0:
-                val_loss = validate(fabric=fabric, 
-                                    model=model, 
-                                    val_dataloader=val_dataloader)
-                fabric.print(f"step {iter_num}: Validation loss: {val_loss}")
-                fabric.barrier()
+            if not is_accumulating:
+                fabric.clip_gradients(model, optimizer=optimizer, max_norm=grad_clip)
+                optimizer.step()
+                optimizer.zero_grad()
+
+                step_count += 1
+                t1 = time.time()
+
+                if val_dataloader is not None and step_count % eval_interval == 0:
+                    val_loss = validate(fabric=fabric, 
+                                        model=model, 
+                                        val_dataloader=val_dataloader)
+                    fabric.print(f"step {iter_num}: Validation loss: {val_loss}")
+                    fabric.barrier()
+                    fabric.log_dict(
+                        {"iter": iter_num, "val_loss": val_loss, "step": step_count, "lr": lr}
+                    )
+                if step_count % save_interval == 0:
+                    fabric.print(f"Saving model at step {step_count} to {out_dir}")
+                    save_model_checkpoint(
+                        fabric,
+                        model,
+                        os.path.join(out_dir, f"iter-{iter_num:06d}.pt"),
+                    )
+            
+            dt = t1 - t0
+            tokens += micro_batch_size * model.config.block_size
+            step_time += t1 - prev_t1
+            prev_t1 = t1
+
+            if iter_num % log_interval == 0:
+                tokens_per_sec = f"{tokens / step_time:.0f}" if not is_accumulating else "-"
                 fabric.log_dict(
-                    {"iter": iter_num, "val_loss": val_loss, "step": step_count, "lr": lr}
+                    {
+                        "iter": iter_num,
+                        "train_loss": loss.item(),
+                        "step": step_count,
+                        "lr": lr,
+                        "time": dt*1000,
+                        "total_time": total_time/3600,
+                        "speed": (tokens * devices * num_nodes) / step_time,
+                        "train_progress": iter_num/max_iters,
+                        "kl_penalty": kl_penalty,
+                    }
                 )
-            if step_count % save_interval == 0:
-                fabric.print(f"Saving model at step {step_count} to {out_dir}")
-                save_model_checkpoint(
-                    fabric,
-                    model,
-                    os.path.join(out_dir, f"iter-{iter_num:06d}.pt"),
+                csv_writer.writerow([iter, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
+                total_time += dt
+                if IBH is not None:
+                    fabric.print("IBH track metrics")
+                    IBH.track_metrics(metrics={"iter": iter_num,
+                                            "train_loss": loss.item(),
+                                            "step": step_count,
+                                            "lr": lr,
+                                            "time": dt*1000,
+                                            "total_time": total_time/3600,
+                                            "speed": (tokens * devices * num_nodes) / step_time,
+                                            "train_progress": iter_num/max_iters,
+                                            "kl_penalty": kl_penalty,
+                                            },
+                                    subset="train")
+                fabric.print(
+                    f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device"
                 )
-        
-        dt = t1 - t0
-        tokens += micro_batch_size * model.config.block_size
-        step_time += t1 - prev_t1
-        prev_t1 = t1
 
-        if iter_num % log_interval == 0:
-            tokens_per_sec = f"{tokens / step_time:.0f}" if not is_accumulating else "-"
-            fabric.log_dict(
-                {
-                    "iter": iter_num,
-                    "lr": lr,
-                    "train_loss": loss.item(),
-                    "step": step_count,
-                    "tokens/sec": tokens_per_sec,
-                }
-            )
-            total_time += dt
-            if IBH is not None:
-                fabric.print("IBH track metrics")
-                IBH.track_metrics(metrics={"iter": iter_num,
-                                           "train_loss": loss.item(),
-                                           "step": step_count,
-                                           "lr": lr,
-                                           "time": dt*1000,
-                                           "total_time": total_time/3600,
-                                           "speed": (tokens * devices * num_nodes) / step_time,
-                                           "train_progress": iter_num/max_iters,
-                                           "kl_penalty": kl_penalty,
-                                           },
-                                  subset="train")
-            fabric.print(
-                f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device"
-            )
-
-        if not is_accumulating:
-            tokens = 0
-            step_time = 0.0
-        if abs(kl_penalty) <= 1e-4 or iter_num >= 29999:
-            stage1 = False
-            fabric.print("Stage 1 finished.")
-        if iter_num > max_iters:
-            break
+            if not is_accumulating:
+                tokens = 0
+                step_time = 0.0
+            if abs(kl_penalty) <= 1e-4 or iter_num >= 1200:
+                stage1 = False
+                fabric.print("Stage 1 finished.")
+            if iter_num > max_iters:
+                break
 
 
 @torch.no_grad()

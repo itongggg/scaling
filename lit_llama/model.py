@@ -6,13 +6,12 @@ Based on the nanoGPT implementation: https://github.com/karpathy/nanoGPT.
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
-from sympy import N
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from typing_extensions import Self
-from lowrank import proximal
+from lit_llama.lowrank import proximal
 from lit_llama.utils import find_multiple
 
 
