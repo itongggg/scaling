@@ -1,6 +1,6 @@
 exp_name: "300m-500m-lowrank-nokl"
 training_config:
-  output_dir: "/workspace/checkpoints/300m-base"
+  output_dir: "/workspace/checkpoints/300m-500m-lowrank-nokl/"
   save_interval: 100
   eval_interval: 100
   log_interval: 1
@@ -10,34 +10,35 @@ training_config:
   num_nodes: 1
   strategy: "FSDP"
   fabric_seed: 1337
-  train_data_dir: "/workspace/result/2"
-  val_data_dir: "/workspace/result/2"
+  train_data_dir: "/workspace/en_data"
+  val_data_dir: "/workspace/en_data"
   dataloader_seed: 1338
   dataloader_chunks: 4
-  dataloader_match_pattern: "/*"
+  dataloader_match_pattern: "*"
   model_name: "300M"
   new_model_name: "500M"
   is_recovery: False
-  checkpoint_path: "/mnt/pool2/tmp/iter-049999.pt"
+  checkpoint_path: "/workspace/300m/iter-049999.pt"
   is_low_rank: True
   num_files: 8000
   is_stage1: False
   flag: True
   kl_ctl: 0.01
 log_config:
-  config_file: "/workspace/scaling/dockerfiles/tsdb_config.yml"
+  config_file: "/workspace/dockerfiles/tsdb_config.yml"
+  csv_file: "/workspace/checkpoints/300m-500m-lowrank-nokl/log.csv"
 data_config:
   Book: 4.90
 hyper_parameters:
   learning_rate: !!python/float 6e-4
-  batch_size: 112
-  micro_batch_size: 4
-  max_iters: 100000
+  batch_size: 512
+  micro_batch_size: 16
+  max_iters: 4000
   weight_decay: !!python/float 1e-1
   beta1: 0.9
   beta2: 0.95
   grad_clip: 1.0
   decay_lr: true
   warmup_iters: 300
-  lr_decay_iters: 100000
+  lr_decay_iters: 4000
   min_lr: !!python/float 6e-5

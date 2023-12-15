@@ -117,22 +117,30 @@ def main(
         train_dataloader, val_dataloader = fabric.setup_dataloaders(
             train_dataloader, val_dataloader
         )
-
-    with fabric.device:
+    logger.info("start growing")
+    model = LLaMA(model_config)
+    state_dict = torch.load(config.training_config.checkpoint_path)
+    model.load_state_dict(state_dict)
+    new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
+    model.grow_model(new_model_config)
+    logger.info("end growing")
+    model.freeze_old_params()
+    model._init_new_weights(config.training_config.is_low_rank)
+    # with fabric.device:
         # torch.set_default_dtype(torch.bfloat16)
-        torch.set_default_dtype(torch.float32)
-        model = LLaMA(model_config)
-        # print(f"model: {model}")
-        state_dict = torch.load(config.training_config.checkpoint_path)
+        # torch.set_default_dtype(torch.float32)
+        # model = LLaMA(model_config)
+        # # print(f"model: {model}")
+        # state_dict = torch.load(config.training_config.checkpoint_path)
         
-        model.load_state_dict(state_dict)
-        new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
-        model.grow_model(new_model_config)
-        model.freeze_old_params()
-        model._init_new_weights(config.training_config.is_low_rank)
+        # model.load_state_dict(state_dict)
+        # new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
+        # model.grow_model(new_model_config)
+        # print(model)
+        
         # model.apply(model._init_weights)
         
-
+    logger.info("shard model")
     model = fabric.setup_module(model)
 
     optimizer = torch.optim.AdamW(

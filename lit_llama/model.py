@@ -171,20 +171,20 @@ class LLaMA(nn.Module):
         self.vocab_grow = new_config.padded_vocab_size - self.config.padded_vocab_size
 
         # grow the embedding layer
-        old_wte = self.transformer.wte.weight.data
+        old_wte = self.transformer.wte.weight
         new_wte = nn.Embedding(new_config.padded_vocab_size, new_config.n_embd)
-        new_wte.weight[: self.config.padded_vocab_size, : self.config.n_embd] = old_wte
+        new_wte.weight[: self.config.padded_vocab_size, : self.config.n_embd].copy_(old_wte)
         self.transformer.wte = new_wte
 
         # grow the linear head
-        old_lm_head = self.lm_head.weight.data
+        old_lm_head = self.lm_head.weight
         new_lm_head = nn.Linear(new_config.n_embd, new_config.padded_vocab_size, bias=False)
-        new_lm_head.weight[: self.config.padded_vocab_size, : self.config.n_embd] = old_lm_head
+        new_lm_head.weight[: self.config.padded_vocab_size, : self.config.n_embd].copy_(old_lm_head)
         self.lm_head = new_lm_head
 
-        old_transforemr_lnf = self.transformer.ln_f.scale.data
+        old_transforemr_lnf = self.transformer.ln_f.scale
         new_transformer_lnf = RMSNorm(new_config.n_embd, num_new_dim=self.emb_grow)
-        new_transformer_lnf.scale[:self.config.n_embd] = old_transforemr_lnf
+        new_transformer_lnf.scale[:self.config.n_embd].copy_(old_transforemr_lnf)
         self.transformer.ln_f = new_transformer_lnf
         # grow the transformer blocks
         new_blocks = [] 
@@ -198,29 +198,36 @@ class LLaMA(nn.Module):
             else:
                 # widden old 
                 if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
-                    old_block_rm1 = old_blocks[0].rms_1.scale.data
-                    old_block_rm2 = old_blocks[0].rms_2.scale.data
+                    old_block_rm1 = old_blocks[0].rms_1.scale
+                    old_block_rm2 = old_blocks[0].rms_2.scale
 
-                    old_block_attn = old_blocks[0].attn.c_attn.weight.data
-                    old_block_proj = old_blocks[0].attn.c_proj.weight.data
+                    old_block_attn = old_blocks[0].attn.c_attn.weight
+                    old_block_proj = old_blocks[0].attn.c_proj.weight
 
-                    old_block_mlp1 = old_blocks[0].mlp.c_fc1.weight.data
-                    old_block_mlp2 = old_blocks[0].mlp.c_fc2.weight.data
-                    old_block_mlp3 = old_blocks[0].mlp.c_proj.weight.data
+                    old_block_mlp1 = old_blocks[0].mlp.c_fc1.weight
+                    old_block_mlp2 = old_blocks[0].mlp.c_fc2.weight
+                    old_block_mlp3 = old_blocks[0].mlp.c_proj.weight
 
                     new_block = Block(new_config)
 
-                    new_block.rms_1.scale.data[:self.config.n_embd] = old_block_rm1
-                    new_block.rms_2.scale.data[:self.config.n_embd] = old_block_rm2
-                    new_block.attn.c_attn.weight.data[:3 * self.config.n_embd, :self.config.n_embd] = old_block_attn
-                    new_block.attn.c_proj.weight.data[:self.config.n_embd, :self.config.n_embd] = old_block_proj
-                    new_block.mlp.c_fc1.weight.data[:old_n_hidden, :self.config.n_embd] = old_block_mlp1
-                    new_block.mlp.c_fc2.weight.data[:old_n_hidden, :self.config.n_embd] = old_block_mlp2
-                    new_block.mlp.c_proj.weight.data[:self.config.n_embd, :old_n_hidden] = old_block_mlp3
+                    new_block.rms_1.scale[:self.config.n_embd].copy_(old_block_rm1)
+                    new_block.rms_2.scale[:self.config.n_embd].copy_(old_block_rm2)
+                    new_block.attn.c_attn.weight[:3 * self.config.n_embd, :self.config.n_embd].copy_(old_block_attn)
+                    new_block.attn.c_proj.weight[:self.config.n_embd, :self.config.n_embd].copy_(old_block_proj)
+                    new_block.mlp.c_fc1.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp1)
+                    new_block.mlp.c_fc2.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp2)
+                    new_block.mlp.c_proj.weight[:self.config.n_embd, :old_n_hidden].copy_(old_block_mlp3)
 
                     new_blocks.append(new_block)
                     self.old_block_index.append(i)
                     del old_blocks[0]
+                    del old_block_rm1
+                    del old_block_rm2
+                    del old_block_attn
+                    del old_block_proj
+                    del old_block_mlp1
+                    del old_block_mlp2
+                    del old_block_mlp3
                 else:
                     new_blocks.append(Block(new_config))
                     self.new_block_index.append(i)
