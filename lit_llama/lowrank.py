@@ -14,13 +14,19 @@ def proximal(
     Xc = torch.randn_like(M)
     P = torch.zeros_like(M)
     P[:shape[0], :shape[1]] = 1
+    dist = 0.0
     for _ in range(step): 
         Y = Xc - t * P * (Xc - M)
-        U, S, V = torch.linalg.svd(Y)
+        U, S, V = torch.linalg.svd(Y, full_matrices=False)
         S = torch.clamp(torch.abs(S - t * mu), max=0)
-        Xc = U @ torch.diag(S) @ V.T
-        if torch.norm(P * (Xc - M)) < 1e-5:
+        # print(f"U: {U.shape}, S: {S.shape},  V: {V.shape}")
+        Xc = U @ torch.diag(S) @ V
+        dist = torch.dist(P*Xc, P*M)
+        
+        if dist < 1e-6:
             break
+    # print("diff: ", torch.norm(P*(Xc - M)))
+    # print(f"dist {dist}")
     if forced:
         Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
     M = Xc

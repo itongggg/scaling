@@ -129,7 +129,7 @@ def main(
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
         model.freeze_old_params()
-        model._init_new_weights(config.training_config.is_low_rank)
+        # model._init_new_weights(config.training_config.is_low_rank)
         # model.apply(model._init_weights)
         
 
@@ -166,8 +166,10 @@ def main(
           micro_batch_size=config.hyper_parameters.micro_batch_size,
           max_iters=config.hyper_parameters.max_iters,
           out_dir=config.training_config.output_dir,
-          stage1=config.training_config.stage1,
-          kl_ctl=config.hyper_parameters.kl_ctl)
+          csv_file=config.log_config.csv_file,
+          flag=config.training_config.flag,
+          stage1=config.training_config.is_stage1,
+          kl_ctl=config.training_config.kl_ctl)
 
 
 def train(
@@ -191,6 +193,8 @@ def train(
         micro_batch_size: int,
         max_iters: int,
         out_dir: str,
+        csv_file: str,
+        flag: bool,
         stage1: bool = True,
         kl_ctl: float = 0.01
 ) -> None:
@@ -202,13 +206,12 @@ def train(
     tokens_sec = 0.0
     prev_t1 = time.time()
     total_time = 0.0
-    
-    with open(config.log_config.csv_file, 'w', newline='') as csvfile:
+    first = True
+    with open(csv_file, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(CSV_HEAD)
         for iter_num, train_data in enumerate(train_dataloader):
             t0 = time.time()
-            flag = config.training_config.flag
             lr = get_lr(it=iter_num, learning_rate=learning_rate, warmup_iters=warmup_iters, lr_decay_iters=lr_decay_iters, min_lr=min_lr) if decay_lr else learning_rate
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
@@ -233,7 +236,7 @@ def train(
                 ) + kl_penalty
                 fabric.backward(loss / grad_accum_steps)
             t1 = time.time()
-
+            val_loss = 0.0
             if not is_accumulating:
                 fabric.clip_gradients(model, optimizer=optimizer, max_norm=grad_clip)
                 optimizer.step()
@@ -241,7 +244,7 @@ def train(
 
                 step_count += 1
                 t1 = time.time()
-
+                
                 if val_dataloader is not None and step_count % eval_interval == 0:
                     val_loss = validate(fabric=fabric, 
                                         model=model, 
@@ -302,8 +305,11 @@ def train(
                 tokens = 0
                 step_time = 0.0
             if abs(kl_penalty) <= 1e-4 or iter_num >= 1200:
-                stage1 = False
-                fabric.print("Stage 1 finished.")
+                
+                if first:
+                    fabric.print("Stage 1 finished.")
+                    first = False
+                    stage1 = False
             if iter_num > max_iters:
                 break
 
