@@ -129,7 +129,7 @@ def main(
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
         model.freeze_old_params()
-        # model._init_new_weights(config.training_config.is_low_rank)
+        model._init_new_weights(config.training_config.is_low_rank)
         # model.apply(model._init_weights)
         
 
@@ -236,7 +236,7 @@ def train(
                 ) + kl_penalty
                 fabric.backward(loss / grad_accum_steps)
             t1 = time.time()
-            val_loss = 0.0
+            val_loss = -1.
             if not is_accumulating:
                 fabric.clip_gradients(model, optimizer=optimizer, max_norm=grad_clip)
                 optimizer.step()
@@ -282,7 +282,7 @@ def train(
                         "kl_penalty": kl_penalty,
                     }
                 )
-                csv_writer.writerow([iter, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
+                csv_writer.writerow([iter_num, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
                 total_time += dt
                 if IBH is not None:
                     fabric.print("IBH track metrics")
