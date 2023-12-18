@@ -30,7 +30,10 @@ import datetime
 def reformat_timestamp(timestamp: float):
     return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
-
+def rm_file(file_path: str) -> NoReturn:
+    if isfile(file_path):
+        os.remove(file_path)
+        
 def timer(func):
     def wrap(*args, **kwargs):
         start = time.time()

@@ -4,6 +4,7 @@ import sys
 import math
 import glob
 import time
+import gc
 from pathlib import Path
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -118,31 +119,41 @@ def main(
             train_dataloader, val_dataloader
         )
     logger.info("start growing")
-    model = LLaMA(model_config)
-    state_dict = torch.load(config.training_config.checkpoint_path)
-    model.load_state_dict(state_dict)
-    new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
-    model.grow_model(new_model_config)
-    logger.info("end growing")
-    model.freeze_old_params()
-    model._init_new_weights(config.training_config.is_low_rank)
-    # with fabric.device:
+    # model = LLaMA(model_config)
+    # state_dict = torch.load(config.training_config.checkpoint_path)
+    # model.load_state_dict(state_dict)
+    # del state_dict
+    # new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
+    # model.grow_model(new_model_config)
+    # logger.info("end growing")
+    # model.freeze_old_params()
+    # model._init_new_weights(config.training_config.is_low_rank)
+    with fabric.device:
         # torch.set_default_dtype(torch.bfloat16)
-        # torch.set_default_dtype(torch.float32)
-        # model = LLaMA(model_config)
-        # # print(f"model: {model}")
-        # state_dict = torch.load(config.training_config.checkpoint_path)
-        
-        # model.load_state_dict(state_dict)
-        # new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
-        # model.grow_model(new_model_config)
+        map_loc = f'cuda:{fabric.global_rank}'
+        torch.set_default_dtype(torch.float32)
+        model = LLaMA(model_config)
+        # print(f"model: {model}")
+        state_dict = torch.load(config.training_config.checkpoint_path, map_location=map_loc)
+        logger.warning(f"rank: {fabric.global_rank}, after state  memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        model.load_state_dict(state_dict)
+        logger.warning(f"rank: {fabric.global_rank}, memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        del state_dict
+        collected = gc.collect()
+        logger.warning(f"Garbage collector: collected {collected} objects.")
+        logger.warning(f"rank: {fabric.global_rank},after del memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        logger.warning("del state_dict")
+        new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
+        model.grow_model(new_model_config)
+        logger.warning(f"rank: {fabric.global_rank}, after grow , memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
         # print(model)
         
         # model.apply(model._init_weights)
-        
+    fabric.barrier()
     logger.info("shard model")
     model = fabric.setup_module(model)
-
+    for _ in range(10000):
+        x = 1
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.hyper_parameters.learning_rate,
@@ -312,7 +323,7 @@ def train(
             if not is_accumulating:
                 tokens = 0
                 step_time = 0.0
-            if abs(kl_penalty) <= 1e-4 or iter_num >= 1200:
+            if abs(kl_penalty) <= 1e-4 or iter_num >= 6666:
                 
                 if first:
                     fabric.print("Stage 1 finished.")

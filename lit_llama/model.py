@@ -6,8 +6,9 @@ Based on the nanoGPT implementation: https://github.com/karpathy/nanoGPT.
 import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
-
+from loguru import logger
 import torch
+import gc
 import torch.nn as nn
 from torch.nn import functional as F
 from typing_extensions import Self
@@ -70,6 +71,7 @@ class LLaMA(nn.Module):
         self.mask_cache: Optional[MaskCache] = None
         self.kv_caches: List[KVCache] = []
         self.mask_grown = False
+        self.hooks = {}
 
     def _init_weights(self, module: nn.Module) -> None:
         if isinstance(module, nn.Linear):
@@ -160,6 +162,7 @@ class LLaMA(nn.Module):
     def grow_model(self, new_config: LLaMAConfig):
         """Grow the model to a new config, by adding more layers and increasing the embedding size.
         """
+        logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         assert new_config.n_embd >= self.config.n_embd
         assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
@@ -228,13 +231,14 @@ class LLaMA(nn.Module):
                     del old_block_mlp1
                     del old_block_mlp2
                     del old_block_mlp3
+                    gc.collect()
                 else:
                     new_blocks.append(Block(new_config))
                     self.new_block_index.append(i)
         
         self.transformer.h = nn.ModuleList(new_blocks)
 
-
+        logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         self.config = new_config
 
 
@@ -265,7 +269,6 @@ class LLaMA(nn.Module):
                     grad_clone[:shape] = 0
                 return grad
             return hook
-        self.hooks = {}
         origin_dim = self.config.n_embd - self.emb_grow
         origin_hidden = find_multiple(int(origin_dim * 8 / 3), 256)
         for i, block in enumerate(self.transformer.h):

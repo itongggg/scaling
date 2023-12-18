@@ -20,7 +20,6 @@ import torch
 from torch.utils.data import DataLoader
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
-import numpy as np
 from loguru import logger
 import colorful as cf
 from utils.tsdb_assistant import InfluxDBHelper
