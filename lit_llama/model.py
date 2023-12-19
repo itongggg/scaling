@@ -238,7 +238,7 @@ class LLaMA(nn.Module):
         
         self.transformer.h = nn.ModuleList(new_blocks)
 
-        logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
+        # logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         self.config = new_config
 
 

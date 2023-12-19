@@ -38,7 +38,7 @@ nvidia-nvjitlink-cu12==12.3.101
 nvidia-nvtx-cu12==12.1.105
 packaging==23.2
 python-dateutil==2.8.2
-pytorch-lightning==2.1.2
+pytorch-lightning==2.1.0
 pytz==2023.3.post1
 PyYAML==6.0.1
 reactivex==4.0.4

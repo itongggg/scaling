@@ -119,15 +119,7 @@ def main(
             train_dataloader, val_dataloader
         )
     logger.info("start growing")
-    # model = LLaMA(model_config)
-    # state_dict = torch.load(config.training_config.checkpoint_path)
-    # model.load_state_dict(state_dict)
-    # del state_dict
-    # new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
-    # model.grow_model(new_model_config)
-    # logger.info("end growing")
-    # model.freeze_old_params()
-    # model._init_new_weights(config.training_config.is_low_rank)
+    
     with fabric.device:
         # torch.set_default_dtype(torch.bfloat16)
         map_loc = f'cuda:{fabric.global_rank}'
@@ -135,25 +127,23 @@ def main(
         model = LLaMA(model_config)
         # print(f"model: {model}")
         state_dict = torch.load(config.training_config.checkpoint_path, map_location=map_loc)
-        logger.warning(f"rank: {fabric.global_rank}, after state  memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        # logger.warning(f"rank: {fabric.global_rank}, after state  memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
         model.load_state_dict(state_dict)
-        logger.warning(f"rank: {fabric.global_rank}, memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        # logger.warning(f"rank: {fabric.global_rank}, memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
         del state_dict
         collected = gc.collect()
-        logger.warning(f"Garbage collector: collected {collected} objects.")
-        logger.warning(f"rank: {fabric.global_rank},after del memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
-        logger.warning("del state_dict")
+        # logger.warning(f"Garbage collector: collected {collected} objects.")
+        # logger.warning(f"rank: {fabric.global_rank},after del memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        # logger.warning("del state_dict")
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
-        logger.warning(f"rank: {fabric.global_rank}, after grow , memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        # logger.warning(f"rank: {fabric.global_rank}, after grow , memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
         # print(model)
-        
+        model._init_new_weights(config.training_config.is_low_rank)
         # model.apply(model._init_weights)
     fabric.barrier()
-    logger.info("shard model")
+    # logger.info("shard model")
     model = fabric.setup_module(model)
-    for _ in range(10000):
-        x = 1
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.hyper_parameters.learning_rate,

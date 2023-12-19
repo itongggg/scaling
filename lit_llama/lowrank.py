@@ -5,18 +5,18 @@ def proximal(
     mu: float,
     t: float,
     shape: tuple,
-    step: int = 100,
+    step: int = 300,
     forced: bool = True
 ) -> torch.Tensor:
     """Proximal operator for nuclear norm.
     """
-    device = torch.device('cuda')
-    print(f"device, {device}")
-    M = M.to(device)
+    # device = torch.device('cuda')
+    # print(f"device, {device}")
+    # M = M.to(device)
     # print(f"M device {M.device}")
     # assert M.device == device
-    Xc = torch.randn_like(M, device='cuda')
-    P = torch.zeros_like(M, device='cuda')
+    Xc = torch.randn_like(M)
+    P = torch.zeros_like(M)
     P[:shape[0], :shape[1]] = 1
     dist = 0.0
     for _ in range(step): 
