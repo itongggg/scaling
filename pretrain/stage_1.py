@@ -232,17 +232,20 @@ def train(
                 logits = model(input_ids)
                 if stage1:
                     with torch.no_grad():
-                        orig_logits = model(input_ids, stage1=stage1)
+                        orig_logits = model(input_ids, stage_1=stage1)
                         kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+                        loss = torch.nn.functional.cross_entropy(
+                            logits.view(-1, logits.size(-1)), targets.view(-1)
+                        ) + kl_penalty
                 else:
-                    kl_penalty = 0
+                    kl_penalty = -1.
                     if flag:
                         model.unfreeze_old_params()
                         flag = False
                 
-                loss = torch.nn.functional.cross_entropy(
-                    logits.view(-1, logits.size(-1)), targets.view(-1)
-                ) + kl_penalty
+                    loss = torch.nn.functional.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1)
+                    ) 
                 fabric.backward(loss / grad_accum_steps)
             t1 = time.time()
             val_loss = -1.
