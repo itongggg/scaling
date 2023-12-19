@@ -134,6 +134,42 @@ class LLaMA(nn.Module):
         logits = self.lm_head(x)  # (b, t, vocab_size)
 
         return logits
+    def forward_old(self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None, stage_1: bool = False):
+        
+        B, T = idx.size()
+        block_size = self.config.block_size
+        if max_seq_length is None:
+            max_seq_length = block_size
+        assert T <= max_seq_length, f"Cannot forward sequence of length {T}, max seq length is only {max_seq_length}"
+        assert max_seq_length <= block_size, f"Cannot attend to {max_seq_length}, block size is only {block_size}"
+        assert T <= block_size, f"Cannot forward sequence of length {T}, block size is only {block_size}"
+
+        if self.rope_cache is None:
+            self.rope_cache = self.build_rope_cache(idx)
+        if self.mask_cache is None:
+            self.mask_cache = self.build_mask_cache(idx)
+
+        if input_pos is not None:
+            rope = self.rope_cache.index_select(0, input_pos)
+            mask = self.mask_cache.index_select(2, input_pos)
+            mask = mask[:, :, :, :max_seq_length]
+        else:
+            rope = self.rope_cache[:T]
+            mask = self.mask_cache[:, :, :T, :T]
+
+        # forward the model itself
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if stage_1:
+            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0)
+            c_mask[:, :, self.config.n_embd - self.emb_grow:] = 0
+            # c_mask.to(device='cuda')
+            x = x * c_mask
+            for block_index in self.old_block_index:
+                x, _ = self.transformer.h[block_index](x, rope, mask, max_seq_length, stage_1=stage_1)
+            x = self.transformer.ln_f(x, stage_1=stage_1)
+            logits = self.lm_head(x)
+            return logits
+    
 
     @classmethod
     def from_name(cls, name: str) -> Self:
@@ -162,7 +198,7 @@ class LLaMA(nn.Module):
     def grow_model(self, new_config: LLaMAConfig):
         """Grow the model to a new config, by adding more layers and increasing the embedding size.
         """
-        logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
+        # logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         assert new_config.n_embd >= self.config.n_embd
         assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
