@@ -106,15 +106,6 @@ class LLaMA(nn.Module):
 
         # forward the model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        if stage_1:
-            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0)
-            c_mask[:, :, self.config.n_embd - self.emb_grow:] = 0
-            x = x * c_mask
-            for block in self.transformer.h:
-                x, _ = block(x, rope, mask, max_seq_length, stage_1=stage_1)
-            x = self.transformer.ln_f(x, stage_1=stage_1)
-            logits = self.lm_head(x)
-            return logits
         if input_pos is None:  # proxy for use_cache=False
             for block in self.transformer.h:
                 x, _ = block(x, rope, mask, max_seq_length)
@@ -134,43 +125,7 @@ class LLaMA(nn.Module):
         logits = self.lm_head(x)  # (b, t, vocab_size)
 
         return logits
-    def forward_old(self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None, stage_1: bool = False):
-        
-        B, T = idx.size()
-        block_size = self.config.block_size
-        if max_seq_length is None:
-            max_seq_length = block_size
-        assert T <= max_seq_length, f"Cannot forward sequence of length {T}, max seq length is only {max_seq_length}"
-        assert max_seq_length <= block_size, f"Cannot attend to {max_seq_length}, block size is only {block_size}"
-        assert T <= block_size, f"Cannot forward sequence of length {T}, block size is only {block_size}"
-
-        if self.rope_cache is None:
-            self.rope_cache = self.build_rope_cache(idx)
-        if self.mask_cache is None:
-            self.mask_cache = self.build_mask_cache(idx)
-
-        if input_pos is not None:
-            rope = self.rope_cache.index_select(0, input_pos)
-            mask = self.mask_cache.index_select(2, input_pos)
-            mask = mask[:, :, :, :max_seq_length]
-        else:
-            rope = self.rope_cache[:T]
-            mask = self.mask_cache[:, :, :T, :T]
-
-        # forward the model itself
-        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        if stage_1:
-            c_mask = torch.ones(self.config.n_embd).unsqueeze(0).unsqueeze(0)
-            c_mask[:, :, self.config.n_embd - self.emb_grow:] = 0
-            # c_mask.to(device='cuda')
-            x = x * c_mask
-            for block_index in self.old_block_index:
-                x, _ = self.transformer.h[block_index](x, rope, mask, max_seq_length, stage_1=stage_1)
-            x = self.transformer.ln_f(x, stage_1=stage_1)
-            logits = self.lm_head(x)
-            return logits
     
-
     @classmethod
     def from_name(cls, name: str) -> Self:
         return cls(LLaMAConfig.from_name(name))
@@ -233,7 +188,7 @@ class LLaMA(nn.Module):
         for i in range(new_config.n_layer):
             if i > 2 * self.config.n_layer - 1:
                 self.new_block_index.append(i)
-                new_blocks.append(Block(new_config, num_new_head=self.head_grow, num_new_dim=self.emb_grow))
+                new_blocks.append(Block(new_config))
             else:
                 # widden old 
                 if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
@@ -291,8 +246,6 @@ class LLaMA(nn.Module):
                     block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight.data, 0.1, 0.1, (orgin_hidden, orgin_dim))
                     block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight.data, 0.1, 0.1, (orgin_hidden, orgin_dim))
                     block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight.data, 0.1, 0.1, (orgin_dim, orgin_hidden))
-                else:
-                    block.apply(self._init_weights)
                     
     
     def freeze_old_params(self):
@@ -347,18 +300,12 @@ class LLaMA(nn.Module):
         self.hooks = {}
 
 class Block(nn.Module):
-    def __init__(self, config: LLaMAConfig, num_new_head: int = None, num_new_dim: int = None) -> None:
+    def __init__(self, config: LLaMAConfig) -> None:
         super().__init__()
-        if num_new_dim is not None and num_new_head is not None:
-            self.rms_1 = RMSNorm(config.n_embd, num_new_dim=num_new_dim)
-            self.attn = CausalSelfAttention(config, num_new_dim=num_new_dim)
-            self.rms_2 = RMSNorm(config.n_embd, num_new_dim=num_new_dim)
-            self.mlp = MLP(config, num_new_dim=num_new_dim)
-        else:
-            self.rms_1 = RMSNorm(config.n_embd)
-            self.attn = CausalSelfAttention(config)
-            self.rms_2 = RMSNorm(config.n_embd)
-            self.mlp = MLP(config)
+        self.rms_1 = RMSNorm(config.n_embd)
+        self.attn = CausalSelfAttention(config)
+        self.rms_2 = RMSNorm(config.n_embd)
+        self.mlp = MLP(config)
 
     def forward(
         self,
@@ -368,22 +315,15 @@ class Block(nn.Module):
         max_seq_length: int,
         input_pos: Optional[torch.Tensor] = None,
         kv_cache: Optional[KVCache] = None,
-        stage_1: bool = False,
     ) -> Tuple[torch.Tensor, Optional[KVCache]]:
-        if stage_1:
-            h, new_kv_cache = self.attn(self.rms_1(x, stage_1=stage_1), rope, mask, max_seq_length, input_pos, kv_cache, stage_1=stage_1)
-            x = x + h
-            x = x + self.mlp(self.rms_2(x, stage_1=stage_1), stage_1=stage_1)
-            return x, new_kv_cache
-        else:
-            h, new_kv_cache = self.attn(self.rms_1(x), rope, mask, max_seq_length, input_pos, kv_cache)
-            x = x + h
-            x = x + self.mlp(self.rms_2(x))
-            return x, new_kv_cache
+        h, new_kv_cache = self.attn(self.rms_1(x), rope, mask, max_seq_length, input_pos, kv_cache)
+        x = x + h
+        x = x + self.mlp(self.rms_2(x))
+        return x, new_kv_cache
 
 
 class CausalSelfAttention(nn.Module):
-    def __init__(self, config: LLaMAConfig, num_new_dim: int = None) -> None:
+    def __init__(self, config: LLaMAConfig) -> None:
         super().__init__()
         assert config.n_embd % config.n_head == 0
 
@@ -395,12 +335,7 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.block_size = config.block_size
-        if num_new_dim is not None:
-            self.c_mask = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0)
-            self.c_mask[:, :, -num_new_dim:] = 0
-        else:
-            self.c_mask = 1
-
+    
     def forward(
         self,
         x: torch.Tensor,
@@ -409,27 +344,13 @@ class CausalSelfAttention(nn.Module):
         max_seq_length: int,
         input_pos: Optional[torch.Tensor] = None,
         kv_cache: Optional[KVCache] = None,
-        stage_1: bool = False,
     ) -> Tuple[torch.Tensor, Optional[KVCache]]:
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
         head_size = C // self.n_head
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        if stage_1:
-            qkv = self.c_attn(x)
-            q, k, v = qkv.split(self.n_embd, dim=2)
-            new_q = torch.clone(q)
-            new_k = torch.clone(k)
-            new_v = torch.clone(v)
-            new_q[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,:self.n_embd-self.num_new_dim]
-            new_k[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,self.n_embd-self.num_new_dim:2*(self.n_embd-self.num_new_dim)]
-            new_v[:,:,:self.n_embd -self.num_new_dim] = qkv[:,:,2*(self.n_embd-self.num_new_dim):3*(self.n_embd-self.num_new_dim)]
-            new_q[:,:,-self.num_new_dim:] = 0
-            new_k[:,:,-self.num_new_dim:] = 0
-            new_v[:,:,-self.num_new_dim:] = 0
-        else:
-            q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
 
-        
+        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+
         k = k.view(B, T, self.n_head, head_size)
         q = q.view(B, T, self.n_head, head_size)
         v = v.view(B, T, self.n_head, head_size)
@@ -453,51 +374,30 @@ class CausalSelfAttention(nn.Module):
             v = cache_v.index_copy(2, input_pos, v)
             kv_cache = k, v
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        #  att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        #  att = att.masked_fill(mask[:,:,:T,:T] == 0, float('-inf'))
-        #  att = F.softmax(att, dim=-1)
-        #  y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-
         # efficient attention using Flash Attention CUDA kernels
         y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C)  # re-assemble all head outputs side by side
 
         # output projection
-        y = self.c_proj(y)
-        if stage_1:
-            return self.c_mask * y, kv_cache
-        else:        
-            return y, kv_cache
+        y = self.c_proj(y)   
+        return y, kv_cache
 
 
 class MLP(nn.Module):
-    def __init__(self, config: LLaMAConfig, num_new_dim: int = None) -> None:
+    def __init__(self, config: LLaMAConfig) -> None:
         super().__init__()
         hidden_dim = 4 * config.n_embd
         n_hidden = int(2 * hidden_dim / 3)
         n_hidden = find_multiple(n_hidden, 256)
-        if num_new_dim is not None:
-            old_n_hidden = find_multiple(int((config.n_embd - num_new_dim) * 8 / 3), 256)
-            self.c_mask1 = torch.ones(config.n_embd).unsqueeze(0).unsqueeze(0)
-            self.c_mask1[:, :, -num_new_dim:] = 0
-            self.c_mask2 = torch.ones(n_hidden).unsqueeze(0).unsqueeze(0) if n_hidden > old_n_hidden else 1
-            self.c_mask2[:, :, -(n_hidden - old_n_hidden):] = 0
-        else:
-            self.c_mask1 = 1
-            self.c_mask2 = 1
+        
         self.c_fc1 = nn.Linear(config.n_embd, n_hidden, bias=False)
         self.c_fc2 = nn.Linear(config.n_embd, n_hidden, bias=False)
         self.c_proj = nn.Linear(n_hidden, config.n_embd, bias=False)
 
-    def forward(self, x: torch.Tensor, stage_1: bool = False) -> torch.Tensor:
-        if stage_1:
-            x = self.c_mask2 * F.silu(self.c_fc1(x)) * self.c_fc2(x)
-            x = self.c_mask1 * self.c_proj(x)
-        else:
-            x = F.silu(self.c_fc1(x)) * self.c_fc2(x)
-            x = self.c_proj(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.silu(self.c_fc1(x)) * self.c_fc2(x)
+        x = self.c_proj(x)
         return x
 
 
@@ -507,30 +407,20 @@ class RMSNorm(nn.Module):
     Derived from https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py. BSD 3-Clause License:
     https://github.com/bzhangGo/rmsnorm/blob/master/LICENSE.
     """
-    def __init__(self, size: int, dim: int = -1, eps: float = 1e-5, num_new_dim: int = None) -> None:
+    def __init__(self, size: int, dim: int = -1, eps: float = 1e-5) -> None:
         super().__init__()
-        if num_new_dim is not None:
-            self.c_scale = float(size) /  float(size - num_new_dim)
-            self.c_mask = torch.ones(size).unsqueeze(0).unsqueeze(0)
-            self.c_mask[:, :, -num_new_dim:] = 0
-        else:
-            self.c_mask = 1
         self.scale = nn.Parameter(torch.ones(size))
         self.eps = eps
         self.dim = dim
 
-    def forward(self, x: torch.Tensor, stage_1: bool = False) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # NOTE: the original RMSNorm paper implementation is not equivalent
         # norm_x = x.norm(2, dim=self.dim, keepdim=True)
         # rms_x = norm_x * d_x ** (-1. / 2)
         # x_normed = x / (rms_x + self.eps)
-        if stage_1:
-            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True) * self.c_scale
-            x_normed = x * torch.rsqrt(norm_x + self.eps)
-            x_normed = x_normed * self.c_mask
-        else:
-            norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
-            x_normed = x * torch.rsqrt(norm_x + self.eps)
+        
+        norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
+        x_normed = x * torch.rsqrt(norm_x + self.eps)
         return self.scale * x_normed 
 
 

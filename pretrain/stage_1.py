@@ -118,32 +118,27 @@ def main(
         train_dataloader, val_dataloader = fabric.setup_dataloaders(
             train_dataloader, val_dataloader
         )
-    logger.info("start growing")
     
-    with fabric.device:
-        # torch.set_default_dtype(torch.bfloat16)
+    with fabric.init_module:
+        
         map_loc = f'cuda:{fabric.global_rank}'
         torch.set_default_dtype(torch.float32)
         model = LLaMA(model_config)
-        # print(f"model: {model}")
+       
         state_dict = torch.load(config.training_config.checkpoint_path, map_location=map_loc)
-        # logger.warning(f"rank: {fabric.global_rank}, after state  memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
-        model.load_state_dict(state_dict)
-        # logger.warning(f"rank: {fabric.global_rank}, memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        old_model = LLaMA(model_config)
+        old_model.load_state_dict(state_dict)
         del state_dict
         collected = gc.collect()
-        # logger.warning(f"Garbage collector: collected {collected} objects.")
-        # logger.warning(f"rank: {fabric.global_rank},after del memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
-        # logger.warning("del state_dict")
+        
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
-        # logger.warning(f"rank: {fabric.global_rank}, after grow , memory usage: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
-        # print(model)
+        
         model._init_new_weights(config.training_config.is_low_rank)
-        # model.apply(model._init_weights)
+        
     fabric.barrier()
-    # logger.info("shard model")
     model = fabric.setup_module(model)
+    old_model = fabric.setup_module(old_model)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.hyper_parameters.learning_rate,
@@ -157,6 +152,7 @@ def main(
     logger.info("start training")
     train(fabric=fabric,
           model=model,
+          old_model=old_model,
           optimizer=optimizer,
           train_dataloader=train_dataloader,
           val_dataloader=val_dataloader,
@@ -184,6 +180,7 @@ def main(
 def train(
         fabric: L.Fabric,
         model: torch.nn.Module,
+        old_model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,   
         train_dataloader: DataLoader,
         val_dataloader: Optional[DataLoader],
@@ -232,7 +229,7 @@ def train(
                 logits = model(input_ids)
                 if stage1:
                     with torch.no_grad():
-                        orig_logits = model(input_ids, stage_1=stage1)
+                        orig_logits = old_model(input_ids)
                         kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
                         loss = torch.nn.functional.cross_entropy(
                             logits.view(-1, logits.size(-1)), targets.view(-1)
