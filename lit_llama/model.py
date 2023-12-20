@@ -232,7 +232,7 @@ class LLaMA(nn.Module):
         # logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         self.config = new_config
 
-
+    @torch.no_grad()
     def _init_new_weights(self, low_rank=True):
         orgin_dim = self.config.n_embd - self.emb_grow
         orgin_hidden = find_multiple(int(orgin_dim * 8 / 3), 256)
@@ -241,11 +241,11 @@ class LLaMA(nn.Module):
                 block.apply(self._init_weights)
             else:
                 if low_rank:
-                    block.attn.c_attn.weight.data = proximal(block.attn.c_attn.weight.data, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
-                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight.data, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight.data, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight.data, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight.data, 0.1, 0.1, (orgin_dim, orgin_hidden))
+                    block.attn.c_attn.weight = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
+                    block.attn.c_proj.weight = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
@@ -256,7 +256,7 @@ class LLaMA(nn.Module):
                     grad_clone[:shape[0], :shape[1]] = 0
                 else:
                     grad_clone[:shape] = 0
-                return grad
+                return grad_clone
             return hook
         origin_dim = self.config.n_embd - self.emb_grow
         origin_hidden = find_multiple(int(origin_dim * 8 / 3), 256)
