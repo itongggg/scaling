@@ -135,7 +135,8 @@ def main(
         model.grow_model(new_model_config)
         
         model._init_new_weights(config.training_config.is_low_rank)
-        
+        model.freeze_old_params()
+
     fabric.barrier()
     model = fabric.setup_module(model)
     old_model = fabric.setup_module(old_model)
