@@ -232,8 +232,8 @@ def train(
                     with torch.no_grad():
                         orig_logits = old_model(input_ids)
                         kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
-                        loss = torch.nn.functional.cross_entropy(
-                            logits.view(-1, logits.size(-1)), targets.view(-1)
+                    loss = torch.nn.functional.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1)
                         ) + kl_penalty
                 else:
                     kl_penalty = -1.
