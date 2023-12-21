@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from loguru import logger
 def proximal(
     M: torch.Tensor,
     mu: float,
@@ -25,9 +26,7 @@ def proximal(
         
         if dist < 5e-8:
             break
-    print(f"dist: {dist}")
-    # print("diff: ", torch.norm(P*(Xc - M)))
-    # print(f"dist {dist}")
+    logger.info("dist: {}", dist)
     if forced:
         Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
     M = Xc
