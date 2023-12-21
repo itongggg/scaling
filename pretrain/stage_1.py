@@ -119,7 +119,7 @@ def main(
             train_dataloader, val_dataloader
         )
     
-    with fabric.init_module:
+    with fabric.device:
         
         map_loc = f'cuda:{fabric.global_rank}'
         torch.set_default_dtype(torch.float32)
@@ -320,6 +320,7 @@ def train(
                     fabric.print("Stage 1 finished.")
                     first = False
                     stage1 = False
+                    flag = True
             if iter_num > max_iters:
                 break
 

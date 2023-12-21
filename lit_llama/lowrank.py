@@ -23,7 +23,7 @@ def proximal(
         Xc = U @ torch.diag(S) @ V
         dist = torch.dist(P*Xc, P*M) / (torch.sum(P).item())
         
-        if dist < 1e-6:
+        if dist < 5e-8:
             break
     print(f"dist: {dist}")
     # print("diff: ", torch.norm(P*(Xc - M)))

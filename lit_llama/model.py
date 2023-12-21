@@ -177,7 +177,7 @@ class LLaMA(nn.Module):
         self.lm_head = new_lm_head
 
         old_transforemr_lnf = self.transformer.ln_f.scale
-        new_transformer_lnf = RMSNorm(new_config.n_embd, num_new_dim=self.emb_grow)
+        new_transformer_lnf = RMSNorm(new_config.n_embd)
         new_transformer_lnf.scale[:self.config.n_embd].copy_(old_transforemr_lnf)
         self.transformer.ln_f = new_transformer_lnf
         # grow the transformer blocks
@@ -241,11 +241,11 @@ class LLaMA(nn.Module):
                 block.apply(self._init_weights)
             else:
                 if low_rank:
-                    block.attn.c_attn.weight = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
-                    block.attn.c_proj.weight = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
+                    block.attn.c_attn.weight.data = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
+                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
