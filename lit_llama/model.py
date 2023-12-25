@@ -241,11 +241,20 @@ class LLaMA(nn.Module):
                 block.apply(self._init_weights)
             else:
                 if low_rank:
-                    block.attn.c_attn.weight.data = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
-                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
+                    # block.attn.c_attn.weight = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
+                    Wq = block.attn.c_attn.weight.data[:orgin_dim, :orgin_dim]
+                    Wk = block.attn.c_attn.weight.data[orgin_dim:2*orgin_dim, :orgin_dim]
+                    Wv = block.attn.c_attn.weight.data[2*orgin_dim:3*orgin_dim, :orgin_dim]
+                    Wq = proximal(Wq, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    Wk = proximal(Wk, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    Wv = proximal(Wv, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.attn.c_attn.weight[:orgin_dim, :orgin_dim] = Wq
+                    block.attn.c_attn.weight[orgin_dim:2*orgin_dim, :orgin_dim] = Wk
+                    block.attn.c_attn.weight[2*orgin_dim:3*orgin_dim, :orgin_dim] = Wv
+                    block.attn.c_proj.weight = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
@@ -299,6 +308,14 @@ class LLaMA(nn.Module):
             hook.remove()
         self.hooks = {}
 
+    def register_forward_hook_for_old_block(self):
+        def hook_fn(module, input, output):
+            print(f"Output of {module.__class__.__name__}: {output}")
+        for i, block in enumerate(self.transformer.h):
+            if i in self.old_block_index:
+                block.attn.register_forward_hook(hook_fn)
+                block.mlp.register_forward_hook(hook_fn)
+    
 class Block(nn.Module):
     def __init__(self, config: LLaMAConfig) -> None:
         super().__init__()

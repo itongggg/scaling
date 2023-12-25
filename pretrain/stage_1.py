@@ -135,7 +135,8 @@ def main(
         model.grow_model(new_model_config)
         
         model._init_new_weights(config.training_config.is_low_rank)
-        model.freeze_old_params()
+        # model.freeze_old_params()
+        model.register_forward_hook_for_old_block()
 
     fabric.barrier()
     model = fabric.setup_module(model)
@@ -294,21 +295,21 @@ def train(
                 )
                 csv_writer.writerow([iter_num, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
                 total_time += dt
-                if IBH is not None:
-                    fabric.print("IBH track metrics")
-                    IBH.track_metrics(metrics={"iter": iter_num,
-                                            "train_loss": loss.item(),
-                                            "step": step_count,
-                                            "lr": lr,
-                                            "time": dt*1000,
-                                            "total_time": total_time/3600,
-                                            "speed": (tokens * devices * num_nodes) / step_time,
-                                            "train_progress": iter_num/max_iters,
-                                            "kl_penalty": kl_penalty,
-                                            },
-                                    subset="train")
+                # if IBH is not None:
+                #     fabric.print("IBH track metrics")
+                #     IBH.track_metrics(metrics={"iter": iter_num,
+                #                             "train_loss": loss.item(),
+                #                             "step": step_count,
+                #                             "lr": lr,
+                #                             "time": dt*1000,
+                #                             "total_time": total_time/3600,
+                #                             "speed": (tokens * devices * num_nodes) / step_time,
+                #                             "train_progress": iter_num/max_iters,
+                #                             "kl_penalty": kl_penalty,
+                #                             },
+                #                     subset="train")
                 fabric.print(
-                    f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device"
+                    f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device, kl_penalty: {kl_penalty:.4f}"
                 )
 
             if not is_accumulating:
