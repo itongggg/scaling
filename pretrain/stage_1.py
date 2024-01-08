@@ -232,9 +232,9 @@ def train(
                 if stage1:
                     with torch.no_grad():
                         orig_logits = old_model(input_ids)
-                        p_orig = torch.nn.functional.softmax(orig_logits, dim=-1)
-                    kl_penalty = kl_ctl * (F.kl_div(get_logps(logits, targets), p_orig, reduction='batchmean'))
-                        # kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+                        # p_orig = torch.nn.functional.softmax(orig_logits, dim=-1)
+                    # kl_penalty = kl_ctl * (F.kl_div(get_logps(logits, targets), p_orig, reduction='batchmean'))
+                    kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
                     loss = torch.nn.functional.cross_entropy(
                         logits.view(-1, logits.size(-1)), targets.view(-1)
                         ) + kl_penalty
