@@ -78,27 +78,27 @@ def main(
     if fabric.global_rank == 0:
         os.makedirs(config.training_config.output_dir, exist_ok=True)
 
-        try:
-            if not DISABLE_IF and fabric.global_rank == 0:
-                hparams = {}
+        # try:
+        #     if not DISABLE_IF and fabric.global_rank == 0:
+        #         hparams = {}
 
-                hparams["world_size"] = fabric.world_size
-                hparams["node_rank"] = fabric.node_rank
-                hparams["global_rank"] = fabric.global_rank
-                hparams["local_rank"] = fabric.local_rank
-                hparams["host_name"] = HOST_NAME
-                hparams["train_data_path"] = str(config.training_config.train_data_dir)
-                hparams["val_data_path"] = str(config.training_config.val_data_dir)
-                for k, v in config.hyper_parameters.items():
-                    hparams[k] = v
-                for k, v in config.data_config.items():
-                    hparams[f"data_{k}"] = v
-                global IBH
-                IBH = InfluxDBHelper(config_file=config.log_config.config_file,
-                                     exp_name=config.exp_name,
-                                     hparams=hparams) 
-        except Exception as e:
-            fabric.print(f"Init ibh error: {e}")
+        #         hparams["world_size"] = fabric.world_size
+        #         hparams["node_rank"] = fabric.node_rank
+        #         hparams["global_rank"] = fabric.global_rank
+        #         hparams["local_rank"] = fabric.local_rank
+        #         hparams["host_name"] = HOST_NAME
+        #         hparams["train_data_path"] = str(config.training_config.train_data_dir)
+        #         hparams["val_data_path"] = str(config.training_config.val_data_dir)
+        #         for k, v in config.hyper_parameters.items():
+        #             hparams[k] = v
+        #         for k, v in config.data_config.items():
+        #             hparams[f"data_{k}"] = v
+        #         global IBH
+        #         IBH = InfluxDBHelper(config_file=config.log_config.config_file,
+        #                              exp_name=config.exp_name,
+        #                              hparams=hparams) 
+        # except Exception as e:
+        #     fabric.print(f"Init ibh error: {e}")
 
     train_dataloader, val_dataloader = create_dataloaders(
         batch_size=config.hyper_parameters.micro_batch_size,
@@ -129,12 +129,11 @@ def main(
         old_model = LLaMA(model_config)
         old_model.load_state_dict(state_dict)
         del state_dict
-        collected = gc.collect()
         
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)
         
-        model._init_new_weights(config.training_config.is_low_rank)
+        model._init_new_weights(low_rank=config.training_config.is_low_rank, new_block=config.training_config.new_block)
         # model.freeze_old_params()
         # model.register_forward_hook_for_old_block()
 
@@ -229,24 +228,24 @@ def train(
             is_accumulating = (iter_num + 1) % grad_accum_steps != 0
             with fabric.no_backward_sync(model, enabled=is_accumulating):
                 logits = model(input_ids)
-                if stage1:
-                    with torch.no_grad():
-                        orig_logits = old_model(input_ids)
-                        # p_orig = torch.nn.functional.softmax(orig_logits, dim=-1)
-                    # kl_penalty = kl_ctl * (F.kl_div(get_logps(logits, targets), p_orig, reduction='batchmean'))
-                    kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
-                    loss = torch.nn.functional.cross_entropy(
-                        logits.view(-1, logits.size(-1)), targets.view(-1)
-                        ) + kl_penalty
-                else:
-                    kl_penalty = -1.
-                    if flag:
-                        model.unfreeze_old_params()
-                        flag = False
+                # if stage1:
+                #     with torch.no_grad():
+                #         orig_logits = old_model(input_ids)
+                #         # p_orig = torch.nn.functional.softmax(orig_logits, dim=-1)
+                #     # kl_penalty = kl_ctl * (F.kl_div(get_logps(logits, targets), p_orig, reduction='batchmean'))
+                #     kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+                #     loss = torch.nn.functional.cross_entropy(
+                #         logits.view(-1, logits.size(-1)), targets.view(-1)
+                #         ) + kl_penalty
+                # else:
+                #     kl_penalty = -1.
+                if flag:
+                    model.unfreeze_old_params()
+                    flag = False
                 
-                    loss = torch.nn.functional.cross_entropy(
-                        logits.view(-1, logits.size(-1)), targets.view(-1)
-                    ) 
+                loss = torch.nn.functional.cross_entropy(
+                    logits.view(-1, logits.size(-1)), targets.view(-1)
+                ) 
                 fabric.backward(loss / grad_accum_steps)
             t1 = time.time()
             val_loss = -1.
@@ -292,7 +291,7 @@ def train(
                         "total_time": total_time/3600,
                         "speed": (tokens * devices * num_nodes) / step_time,
                         "train_progress": iter_num/max_iters,
-                        "kl_penalty": kl_penalty,
+                        # "kl_penalty": kl_penalty,
                     }
                 )
                 csv_writer.writerow([iter_num, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
@@ -311,14 +310,13 @@ def train(
                 #                             },
                 #                     subset="train")
                 fabric.print(
-                    f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device, kl_penalty: {kl_penalty:.4f}"
+                    f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, speed: {tokens_per_sec} toks/s/device"
                 )
 
             if not is_accumulating:
                 tokens = 0
                 step_time = 0.0
-            if abs(kl_penalty) <= 1e-4 or iter_num >= 6666:
-                
+            if iter_num >= 6666: 
                 if first:
                     fabric.print("Stage 1 finished.")
                     first = False
