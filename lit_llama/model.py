@@ -80,7 +80,7 @@ class LLaMA(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layer))
 
     def forward(
-        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None, stage_1: bool = False
+        self, idx: torch.Tensor, max_seq_length: Optional[int] = None, input_pos: Optional[torch.Tensor] = None, res: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[KVCache]]]:
         B, T = idx.size()
 
@@ -107,8 +107,16 @@ class LLaMA(nn.Module):
         # forward the model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         if input_pos is None:  # proxy for use_cache=False
-            for block in self.transformer.h:
-                x, _ = block(x, rope, mask, max_seq_length)
+            if res:
+                for i, block in enumerate(self.transformer.h):
+                    if i in self.new_block_index:
+                        x_new, _ = block(x, rope, mask, max_seq_length)
+                        x = 0.5 * x + 0.5 * x_new
+                    else:
+                        x, _ = block(x, rope, mask, max_seq_length)
+            else:
+                for block in self.transformer.h:
+                    x, _ = block(x, rope, mask, max_seq_length)
         else:
             if not self.kv_caches:
                 head_size = self.config.n_embd // self.config.n_head
