@@ -17,7 +17,7 @@ from lit_llama.packed_dataset import PackedDataset, CombinedDataset
 from lit_llama.model import Block, LLaMA, LLaMAConfig
 import lightning as L
 from lightning.fabric.strategies import DDPStrategy, FSDPStrategy
-
+import torch.nn.functional as F
 import torch
 from torch.utils.data import DataLoader
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
@@ -136,7 +136,7 @@ def main(
         
         model._init_new_weights(config.training_config.is_low_rank)
         # model.freeze_old_params()
-        model.register_forward_hook_for_old_block()
+        # model.register_forward_hook_for_old_block()
 
     fabric.barrier()
     model = fabric.setup_module(model)
@@ -232,7 +232,9 @@ def train(
                 if stage1:
                     with torch.no_grad():
                         orig_logits = old_model(input_ids)
-                        kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
+                        p_orig = torch.nn.functional.softmax(orig_logits, dim=-1)
+                    kl_penalty = kl_ctl * (F.kl_div(get_logps(logits, targets), p_orig, reduction='batchmean'))
+                        # kl_penalty = kl_ctl * (get_logps(orig_logits, targets).view(-1) - get_logps(logits, targets).view(-1)).mean()
                     loss = torch.nn.functional.cross_entropy(
                         logits.view(-1, logits.size(-1)), targets.view(-1)
                         ) + kl_penalty
@@ -322,6 +324,8 @@ def train(
                     first = False
                     stage1 = False
                     flag = True
+            if iter_num >= 6000:
+                break
             if iter_num > max_iters:
                 break
 

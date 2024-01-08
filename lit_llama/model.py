@@ -233,12 +233,35 @@ class LLaMA(nn.Module):
         self.config = new_config
 
     @torch.no_grad()
-    def _init_new_weights(self, low_rank=True):
+    def _init_new_weights(self, low_rank=True, new_block="random"):
         orgin_dim = self.config.n_embd - self.emb_grow
         orgin_hidden = find_multiple(int(orgin_dim * 8 / 3), 256)
         for i, block in enumerate(self.transformer.h):
             if i in self.new_block_index:
-                block.apply(self._init_weights)
+                if new_block == "random":
+                    block.apply(self._init_weights)
+                if new_block == "up":
+                    index = min(num for num in self.old_block_index if num > i)
+                    block.attn.c_attn.weight.data = self.transformer.h[index].c_attn.weight.data
+                    block.attn.c_proj.weight.data = self.transformer.h[index].c_proj.weight.data
+                    block.mlp.c_fc1.weight.data = self.transformer.h[index].mlp.c_fc1.weight.data
+                    block.mlp.c_fc2.weight.data = self.transformer.h[index].mlp.c_fc2.weight.data
+                    block.mlp.c_proj.weight.data = self.transformer.h[index].mlp.c_proj.weight.data
+                if new_block == "down":
+                    index = max(num for num in self.old_block_index if num < i)
+                    block.attn.c_attn.weight.data = self.transformer.h[index].c_attn.weight.data
+                    block.attn.c_proj.weight.data = self.transformer.h[index].c_proj.weight.data
+                    block.mlp.c_fc1.weight.data = self.transformer.h[index].mlp.c_fc1.weight.data
+                    block.mlp.c_fc2.weight.data = self.transformer.h[index].mlp.c_fc2.weight.data
+                    block.mlp.c_proj.weight.data = self.transformer.h[index].mlp.c_proj.weight.data  
+                if new_block == "linear":
+                    i1 = min(num for num in self.old_block_index if num > i)
+                    i2 = max(num for num in self.old_block_index if num < i)
+                    block.attn.c_attn.weight.data = 0.5 * self.transformer.h[i1].c_attn.weight.data + 0.5 * self.transformer.h[i2].c_attn.weight.data
+                    block.attn.c_proj.weight.data = 0.5 * self.transformer.h[i1].c_proj.weight.data + 0.5 * self.transformer.h[i2].c_proj.weight.data
+                    block.mlp.c_fc1.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc1.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc1.weight.data
+                    block.mlp.c_fc2.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc2.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc2.weight.data
+                    block.mlp.c_proj.weight.data = 0.5 * self.transformer.h[i1].mlp.c_proj.weight.data + 0.5 * self.transformer.h[i2].mlp.c_proj.weight.data
             else:
                 if low_rank:
                     # block.attn.c_attn.weight = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
@@ -247,14 +270,14 @@ class LLaMA(nn.Module):
                     Wv = block.attn.c_attn.weight.data[2*orgin_dim:3*orgin_dim, :orgin_dim]
                     Wq = proximal(Wq, 0.1, 0.1, (orgin_dim, orgin_dim))
                     Wk = proximal(Wk, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    Wv = proximal(Wv, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    Wv = proximal(Wv, 0.2, 0.1, (orgin_dim, orgin_dim))
                     block.attn.c_attn.weight[:orgin_dim, :orgin_dim] = Wq
                     block.attn.c_attn.weight[orgin_dim:2*orgin_dim, :orgin_dim] = Wk
                     block.attn.c_attn.weight[2*orgin_dim:3*orgin_dim, :orgin_dim] = Wv
-                    block.attn.c_proj.weight = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
+                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.2, 0.1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.05, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.05, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
@@ -346,6 +369,8 @@ class CausalSelfAttention(nn.Module):
 
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=False)
+        # self.Wq = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        # self.Wv = nn.Linear(config.n_embd, config.n_embd, bias=False)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
 

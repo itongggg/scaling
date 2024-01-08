@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 from loguru import logger
 def proximal(
     M: torch.Tensor,
@@ -7,7 +6,7 @@ def proximal(
     t: float,
     shape: tuple,
     step: int = 200,
-    forced: bool = True
+    forced: bool = False
 ) -> torch.Tensor:
     """Proximal operator for nuclear norm.
     """
@@ -20,7 +19,6 @@ def proximal(
         Y = Xc - t * P * (Xc - M)
         U, S, V = torch.linalg.svd(Y, full_matrices=False)
         S = torch.clamp(torch.abs(S) - t*mu, min=0)
-        # print(f"U: {U.shape}, S: {S.shape},  V: {V.shape}")
         Xc = U @ torch.diag(S) @ V
         dist = torch.dist(P*Xc, P*M) / (torch.sum(P).item())
         
