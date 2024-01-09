@@ -174,8 +174,8 @@ def main(
           out_dir=config.training_config.output_dir,
           csv_file=config.log_config.csv_file,
           flag=config.training_config.flag,
-          stage1=config.training_config.is_stage1,
-          kl_ctl=config.training_config.kl_ctl)
+          res=config.training_config.is_res,
+          )
 
 
 def train(
@@ -202,8 +202,7 @@ def train(
         out_dir: str,
         csv_file: str,
         flag: bool,
-        stage1: bool = True,
-        kl_ctl: float = 0.01
+        res: bool,
 ) -> None:
 
     step_count = 0
@@ -227,7 +226,7 @@ def train(
 
             is_accumulating = (iter_num + 1) % grad_accum_steps != 0
             with fabric.no_backward_sync(model, enabled=is_accumulating):
-                logits = model(input_ids)
+                logits = model(input_ids, res=res)
                 # if stage1:
                 #     with torch.no_grad():
                 #         orig_logits = old_model(input_ids)
@@ -294,7 +293,7 @@ def train(
                         # "kl_penalty": kl_penalty,
                     }
                 )
-                csv_writer.writerow([iter_num, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time, kl_penalty])
+                csv_writer.writerow([iter_num, lr, step_count, loss, val_loss, dt*1000, (tokens * devices * num_nodes) / step_time])
                 total_time += dt
                 # if IBH is not None:
                 #     fabric.print("IBH track metrics")
@@ -316,11 +315,10 @@ def train(
             if not is_accumulating:
                 tokens = 0
                 step_time = 0.0
-            if iter_num >= 6666: 
+            if iter_num >= 500: 
                 if first:
                     fabric.print("Stage 1 finished.")
                     first = False
-                    stage1 = False
                     flag = True
             if iter_num >= 6000:
                 break
