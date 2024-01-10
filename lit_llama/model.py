@@ -273,18 +273,18 @@ class LLaMA(nn.Module):
             else:
                 if low_rank:
                     # block.attn.c_attn.weight = proximal(block.attn.c_attn.weight, 0.1, 0.1, (3 * orgin_dim, orgin_dim))
-                    Wq = block.attn.c_attn.weight.data[:orgin_dim, :orgin_dim]
-                    Wk = block.attn.c_attn.weight.data[orgin_dim:2*orgin_dim, :orgin_dim]
-                    Wv = block.attn.c_attn.weight.data[2*orgin_dim:3*orgin_dim, :orgin_dim]
+                    Wq = block.attn.c_attn.weight.data[:self.config.n_embd, :self.config.n_embd]
+                    Wk = block.attn.c_attn.weight.data[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd]
+                    Wv = block.attn.c_attn.weight.data[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd]
                     Wq = proximal(Wq, 0.1, 0.1, (orgin_dim, orgin_dim))
                     Wk = proximal(Wk, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    Wv = proximal(Wv, 0.2, 0.1, (orgin_dim, orgin_dim))
-                    block.attn.c_attn.weight[:orgin_dim, :orgin_dim] = Wq
-                    block.attn.c_attn.weight[orgin_dim:2*orgin_dim, :orgin_dim] = Wk
-                    block.attn.c_attn.weight[2*orgin_dim:3*orgin_dim, :orgin_dim] = Wv
-                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.2, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.05, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.05, 0.1, (orgin_hidden, orgin_dim))
+                    Wv = proximal(Wv, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.attn.c_attn.weight[:self.config.n_embd, :self.config.n_embd] = Wq
+                    block.attn.c_attn.weight[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd] = Wk
+                    block.attn.c_attn.weight[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd] = Wv
+                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
                     block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
                     
     
