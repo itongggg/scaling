@@ -126,8 +126,9 @@ def main(
         model = LLaMA(model_config)
        
         state_dict = torch.load(config.training_config.checkpoint_path, map_location=map_loc)
-        old_model = LLaMA(model_config)
-        old_model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict)
+        # old_model = LLaMA(model_config)
+        # old_model.load_state_dict(state_dict)
         del state_dict
         
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
@@ -139,7 +140,7 @@ def main(
 
     fabric.barrier()
     model = fabric.setup_module(model)
-    old_model = fabric.setup_module(old_model)
+    # old_model = fabric.setup_module(old_model)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.hyper_parameters.learning_rate,
@@ -153,7 +154,6 @@ def main(
     logger.info("start training")
     train(fabric=fabric,
           model=model,
-          old_model=old_model,
           optimizer=optimizer,
           train_dataloader=train_dataloader,
           val_dataloader=val_dataloader,
@@ -181,7 +181,6 @@ def main(
 def train(
         fabric: L.Fabric,
         model: torch.nn.Module,
-        old_model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,   
         train_dataloader: DataLoader,
         val_dataloader: Optional[DataLoader],
