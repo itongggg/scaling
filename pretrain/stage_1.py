@@ -129,7 +129,7 @@ def main(
         model.load_state_dict(state_dict)
         # old_model = LLaMA(model_config)
         # old_model.load_state_dict(state_dict)
-        del state_dict
+        # del state_dict
         
         new_model_config = LLaMAConfig.from_name(config.training_config.new_model_name)
         model.grow_model(new_model_config)

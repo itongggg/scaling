@@ -158,10 +158,31 @@ class LLaMA(nn.Module):
             self.mask_cache = None
     
     @torch.no_grad()
-    def grow_model(self, new_config: LLaMAConfig):
+    def grow_model(self, new_config: LLaMAConfig, way: str = "smooth"):
         """Grow the model to a new config, by adding more layers and increasing the embedding size.
         """
-        # logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
+        def copy_weight():
+            old_block_rm1 = old_blocks[0].rms_1.scale
+            old_block_rm2 = old_blocks[0].rms_2.scale
+
+            old_block_attn = old_blocks[0].attn.c_attn.weight
+            old_block_proj = old_blocks[0].attn.c_proj.weight
+
+            old_block_mlp1 = old_blocks[0].mlp.c_fc1.weight
+            old_block_mlp2 = old_blocks[0].mlp.c_fc2.weight
+            old_block_mlp3 = old_blocks[0].mlp.c_proj.weight
+
+            new_block = Block(new_config)
+            new_block.rms_1.scale[:self.config.n_embd].copy_(old_block_rm1)
+            new_block.rms_2.scale[:self.config.n_embd].copy_(old_block_rm2)
+            new_block.attn.c_attn.weight[:3 * self.config.n_embd, :self.config.n_embd].copy_(old_block_attn)
+            new_block.attn.c_proj.weight[:self.config.n_embd, :self.config.n_embd].copy_(old_block_proj)
+            new_block.mlp.c_fc1.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp1)
+            new_block.mlp.c_fc2.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp2)
+            new_block.mlp.c_proj.weight[:self.config.n_embd, :old_n_hidden].copy_(old_block_mlp3)
+
+            return new_block
+
         assert new_config.n_embd >= self.config.n_embd
         assert new_config.n_layer >= self.config.n_layer
         assert new_config.block_size == self.config.block_size
@@ -193,52 +214,50 @@ class LLaMA(nn.Module):
         old_blocks = self.transformer.h
         
         old_n_hidden = find_multiple(int(self.config.n_embd * 4 * 2 / 3), 256)
-        for i in range(new_config.n_layer):
-            if i > 2 * self.config.n_layer - 1:
-                self.new_block_index.append(i)
-                new_blocks.append(Block(new_config))
-            else:
-                # widden old 
-                if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
-                    old_block_rm1 = old_blocks[0].rms_1.scale
-                    old_block_rm2 = old_blocks[0].rms_2.scale
-
-                    old_block_attn = old_blocks[0].attn.c_attn.weight
-                    old_block_proj = old_blocks[0].attn.c_proj.weight
-
-                    old_block_mlp1 = old_blocks[0].mlp.c_fc1.weight
-                    old_block_mlp2 = old_blocks[0].mlp.c_fc2.weight
-                    old_block_mlp3 = old_blocks[0].mlp.c_proj.weight
-
-                    new_block = Block(new_config)
-
-                    new_block.rms_1.scale[:self.config.n_embd].copy_(old_block_rm1)
-                    new_block.rms_2.scale[:self.config.n_embd].copy_(old_block_rm2)
-                    new_block.attn.c_attn.weight[:3 * self.config.n_embd, :self.config.n_embd].copy_(old_block_attn)
-                    new_block.attn.c_proj.weight[:self.config.n_embd, :self.config.n_embd].copy_(old_block_proj)
-                    new_block.mlp.c_fc1.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp1)
-                    new_block.mlp.c_fc2.weight[:old_n_hidden, :self.config.n_embd].copy_(old_block_mlp2)
-                    new_block.mlp.c_proj.weight[:self.config.n_embd, :old_n_hidden].copy_(old_block_mlp3)
-
-                    new_blocks.append(new_block)
-                    self.old_block_index.append(i)
-                    del old_blocks[0]
-                    del old_block_rm1
-                    del old_block_rm2
-                    del old_block_attn
-                    del old_block_proj
-                    del old_block_mlp1
-                    del old_block_mlp2
-                    del old_block_mlp3
-                    gc.collect()
-                else:
-                    new_blocks.append(Block(new_config))
+        if way == "smooth":
+            for i in range(new_config.n_layer):
+                if i > 2 * self.config.n_layer - 1:
                     self.new_block_index.append(i)
-        
+                    new_blocks.append(Block(new_config))
+                else:
+                    if i % 2 == 0 or i > 2 * (new_config.n_layer - self.config.n_layer) - 1:
+                        new_blocks.append(copy_weight())
+                        self.old_block_index.append(i)
+                        del old_blocks[0]
+                    else:
+                        new_blocks.append(Block(new_config))
+                        self.new_block_index.append(i)
+        if way == "up":
+            for i in range(new_config.n_layer):
+                if i < self.config.n_layer:
+                    self.old_block_index.append(i)
+                    new_blocks.append(copy_weight())
+                    del old_blocks[0]
+                else:
+                    self.new_block_index.append(i)
+                    new_blocks.append(Block(new_config))
+        if way == "down":
+            for i in range(new_config.n_layer):
+                if i >= self.layer_grow:
+                    self.old_block_index.append(i)
+                    new_blocks.append(copy_weight())
+                    del old_blocks[0]
+                else:
+                    self.new_block_index.append(i)
+                    new_blocks.append(Block(new_config))
+        if way == "middle":
+            middle = int(self.config.n_layer / 2)
+            for i in range(new_config.n_layer):
+                if i >= middle and i < middle + self.layer_grow:
+                    self.new_block_index.append(i)
+                    new_blocks.append(Block(new_config))
+                else:
+                    self.old_block_index.append(i)
+                    new_blocks.append(copy_weight())
+                    del old_blocks[0]
         self.transformer.h = nn.ModuleList(new_blocks)
-
-        # logger.warning(f"rank {torch.distributed.get_rank()} is growing the model, memory usage {torch.cuda.memory_summary(device=torch.distributed.get_rank(), abbreviated=False)} GB")
         self.config = new_config
+
 
     @torch.no_grad()
     def _init_new_weights(self, low_rank=True, new_block="random"):
@@ -276,16 +295,16 @@ class LLaMA(nn.Module):
                     Wq = block.attn.c_attn.weight.data[:self.config.n_embd, :self.config.n_embd]
                     Wk = block.attn.c_attn.weight.data[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd]
                     Wv = block.attn.c_attn.weight.data[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd]
-                    Wq = proximal(Wq, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    Wk = proximal(Wk, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    Wv = proximal(Wv, 0.1, 0.1, (orgin_dim, orgin_dim))
+                    Wq = proximal(Wq, 1, 1, (orgin_dim, orgin_dim))
+                    Wk = proximal(Wk, 1, 1, (orgin_dim, orgin_dim))
+                    Wv = proximal(Wv, 1, 1, (orgin_dim, orgin_dim))
                     block.attn.c_attn.weight[:self.config.n_embd, :self.config.n_embd] = Wq
                     block.attn.c_attn.weight[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd] = Wk
                     block.attn.c_attn.weight[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd] = Wv
-                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.1, 0.1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 0.1, (orgin_dim, orgin_hidden))
+                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 1, 1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 1, 1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 1, 1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 1, 1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
