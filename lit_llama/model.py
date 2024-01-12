@@ -214,6 +214,13 @@ class LLaMA(nn.Module):
         old_blocks = self.transformer.h
         
         old_n_hidden = find_multiple(int(self.config.n_embd * 4 * 2 / 3), 256)
+        
+        if new_config.n_layer == self.config.n_layer:
+            for i in range(new_config.n_layer):
+                self.old_block_index.append(i)
+                new_blocks.append(copy_weight())
+                del old_blocks[0]
+
         if way == "smooth":
             for i in range(new_config.n_layer):
                 if i > 2 * self.config.n_layer - 1:

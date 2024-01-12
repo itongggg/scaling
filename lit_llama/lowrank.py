@@ -6,12 +6,13 @@ def proximal(
     t: float,
     shape: tuple,
     step: int = 200,
-    forced: bool = False
+    reduction: bool = False
 ) -> torch.Tensor:
     """Proximal operator for nuclear norm.
     """
 
-    Xc = torch.randn_like(M)
+    # Xc = torch.randn_like(M)
+    Xc = M.clone()
     P = torch.zeros_like(M)
     P[:shape[0], :shape[1]] = 1
     dist = 0.0
@@ -20,13 +21,12 @@ def proximal(
         U, S, V = torch.linalg.svd(Y, full_matrices=False)
         S = torch.clamp(torch.abs(S) - t*mu, min=0)
         Xc = U @ torch.diag(S) @ V
-        dist = torch.dist(P*Xc, P*M) / (torch.sum(P).item())
-        
-        if dist < 5e-8:
-            break
+    dist = torch.dist(P*Xc, P*M) / (torch.sum(P).item())
     logger.info("dist: {}", dist)
-    if forced:
-        Xc[:shape[0], :shape[1]] = M[:shape[0], :shape[1]]
+    if reduction:
+        U, S, V = torch.linalg.svd(Xc, full_matrices=False)
+        S = torch.where(S > 1e-6, S, torch.tensor(0.0))
+        Xc = U @ torch.diag(S) @ V
     M = Xc
     return M
 
