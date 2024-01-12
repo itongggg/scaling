@@ -319,8 +319,7 @@ def train(
                     fabric.print("Stage 1 finished.")
                     first = False
                     flag = True
-            if iter_num >= 6000:
-                break
+            
             if iter_num > max_iters:
                 break
 
