@@ -291,8 +291,8 @@ class LLaMA(nn.Module):
                 if new_block == "linear":
                     i1 = min(num for num in self.old_block_index if num > i)
                     i2 = max(num for num in self.old_block_index if num < i)
-                    block.attn.c_attn.weight.data = 0.5 * self.transformer.h[i1].attn.c_attn.weight.data + 0.5 * self.transformer.h[i2].c_attn.weight.data
-                    block.attn.c_proj.weight.data = 0.5 * self.transformer.h[i1].attn.c_proj.weight.data + 0.5 * self.transformer.h[i2].c_proj.weight.data
+                    block.attn.c_attn.weight.data = 0.5 * self.transformer.h[i1].attn.c_attn.weight.data + 0.5 * self.transformer.h[i2].attn.c_attn.weight.data
+                    block.attn.c_proj.weight.data = 0.5 * self.transformer.h[i1].attn.c_proj.weight.data + 0.5 * self.transformer.h[i2].attn.c_proj.weight.data
                     block.mlp.c_fc1.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc1.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc1.weight.data
                     block.mlp.c_fc2.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc2.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc2.weight.data
                     block.mlp.c_proj.weight.data = 0.5 * self.transformer.h[i1].mlp.c_proj.weight.data + 0.5 * self.transformer.h[i2].mlp.c_proj.weight.data
@@ -302,16 +302,16 @@ class LLaMA(nn.Module):
                     Wq = block.attn.c_attn.weight.data[:self.config.n_embd, :self.config.n_embd]
                     Wk = block.attn.c_attn.weight.data[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd]
                     Wv = block.attn.c_attn.weight.data[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd]
-                    Wq = proximal(Wq, 1, 1, (orgin_dim, orgin_dim))
-                    Wk = proximal(Wk, 1, 1, (orgin_dim, orgin_dim))
-                    Wv = proximal(Wv, 1, 1, (orgin_dim, orgin_dim))
+                    Wq = proximal(Wq, 0.1, 1, (orgin_dim, orgin_dim))
+                    Wk = proximal(Wk, 0.1, 1, (orgin_dim, orgin_dim))
+                    Wv = proximal(Wv, 0.1, 1, (orgin_dim, orgin_dim))
                     block.attn.c_attn.weight[:self.config.n_embd, :self.config.n_embd] = Wq
                     block.attn.c_attn.weight[self.config.n_embd:2*self.config.n_embd, :self.config.n_embd] = Wk
                     block.attn.c_attn.weight[2*self.config.n_embd:3*self.config.n_embd, :self.config.n_embd] = Wv
-                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 1, 1, (orgin_dim, orgin_dim))
-                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 1, 1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 1, 1, (orgin_hidden, orgin_dim))
-                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 1, 1, (orgin_dim, orgin_hidden))
+                    block.attn.c_proj.weight.data = proximal(block.attn.c_proj.weight, 0.1, 1, (orgin_dim, orgin_dim))
+                    block.mlp.c_fc1.weight.data = proximal(block.mlp.c_fc1.weight, 0.1, 1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_fc2.weight.data = proximal(block.mlp.c_fc2.weight, 0.1, 1, (orgin_hidden, orgin_dim))
+                    block.mlp.c_proj.weight.data = proximal(block.mlp.c_proj.weight, 0.1, 1, (orgin_dim, orgin_hidden))
                     
     
     def freeze_old_params(self):
