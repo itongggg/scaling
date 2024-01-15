@@ -19,7 +19,7 @@ def proximal(
     for _ in range(step): 
         Y = Xc - t * P * (Xc - M)
         U, S, V = torch.linalg.svd(Y, full_matrices=False)
-        S = torch.clamp(torch.abs(S) - t*mu, min=0)
+        S = torch.max(S - t*mu, torch.tensor(0.0))
         Xc = U @ torch.diag(S) @ V
     dist = torch.dist(P*Xc, P*M) / (torch.sum(P).item())
     logger.info("dist: {}", dist)
