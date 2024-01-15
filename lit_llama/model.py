@@ -276,23 +276,23 @@ class LLaMA(nn.Module):
                     block.apply(self._init_weights)
                 if new_block == "up":
                     index = min(num for num in self.old_block_index if num > i)
-                    block.attn.c_attn.weight.data = self.transformer.h[index].c_attn.weight.data
-                    block.attn.c_proj.weight.data = self.transformer.h[index].c_proj.weight.data
+                    block.attn.c_attn.weight.data = self.transformer.h[index].attn.c_attn.weight.data
+                    block.attn.c_proj.weight.data = self.transformer.h[index].attn.c_proj.weight.data
                     block.mlp.c_fc1.weight.data = self.transformer.h[index].mlp.c_fc1.weight.data
                     block.mlp.c_fc2.weight.data = self.transformer.h[index].mlp.c_fc2.weight.data
                     block.mlp.c_proj.weight.data = self.transformer.h[index].mlp.c_proj.weight.data
                 if new_block == "down":
                     index = max(num for num in self.old_block_index if num < i)
-                    block.attn.c_attn.weight.data = self.transformer.h[index].c_attn.weight.data
-                    block.attn.c_proj.weight.data = self.transformer.h[index].c_proj.weight.data
+                    block.attn.c_attn.weight.data = self.transformer.h[index].attn.c_attn.weight.data
+                    block.attn.c_proj.weight.data = self.transformer.h[index].attn.c_proj.weight.data
                     block.mlp.c_fc1.weight.data = self.transformer.h[index].mlp.c_fc1.weight.data
                     block.mlp.c_fc2.weight.data = self.transformer.h[index].mlp.c_fc2.weight.data
                     block.mlp.c_proj.weight.data = self.transformer.h[index].mlp.c_proj.weight.data  
                 if new_block == "linear":
                     i1 = min(num for num in self.old_block_index if num > i)
                     i2 = max(num for num in self.old_block_index if num < i)
-                    block.attn.c_attn.weight.data = 0.5 * self.transformer.h[i1].c_attn.weight.data + 0.5 * self.transformer.h[i2].c_attn.weight.data
-                    block.attn.c_proj.weight.data = 0.5 * self.transformer.h[i1].c_proj.weight.data + 0.5 * self.transformer.h[i2].c_proj.weight.data
+                    block.attn.c_attn.weight.data = 0.5 * self.transformer.h[i1].attn.c_attn.weight.data + 0.5 * self.transformer.h[i2].c_attn.weight.data
+                    block.attn.c_proj.weight.data = 0.5 * self.transformer.h[i1].attn.c_proj.weight.data + 0.5 * self.transformer.h[i2].c_proj.weight.data
                     block.mlp.c_fc1.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc1.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc1.weight.data
                     block.mlp.c_fc2.weight.data = 0.5 * self.transformer.h[i1].mlp.c_fc2.weight.data + 0.5 * self.transformer.h[i2].mlp.c_fc2.weight.data
                     block.mlp.c_proj.weight.data = 0.5 * self.transformer.h[i1].mlp.c_proj.weight.data + 0.5 * self.transformer.h[i2].mlp.c_proj.weight.data
